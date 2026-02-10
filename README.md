@@ -1,19 +1,23 @@
-  Master Photo Library/
-  ├── app/                      ← all source code
-  │   ├── run.py                ← entry point: python app/run.py
-  │   ├── requirements.txt
-  │   ├── server/
-  │   │   ├── __init__.py
-  │   │   ├── __main__.py
-  │   │   ├── actions.py
-  │   │   ├── app.py
-  │   │   ├── database.py
-  │   │   ├── importer.py
-  │   │   ├── ocr.py
-  │   │   └── thumbnails.py
-  │   └── static/
-  │       ├── index.html
-  │       ├── css/style.css
-  │       └── js/ (9 files)
-  ├── .library/                 ← generated data (DB, thumbnails, crops)
-  ├── All other source image folders
+
+```text
+Master Photo Library/
+├── app/                    # All source code
+│   ├── run.py              # Entry point: python app/run.py
+│   ├── requirements.txt
+│   └── server/
+│       ├── init.py
+│       ├── main.py
+│       ├── actions.py
+│       ├── app.py
+│       ├── database.py
+│       ├── importer.py
+│       └── ocr.py
+├── thumbnails.py
+├── static/
+│   ├── index.html
+│   ├── css/
+│   │   └── style.css
+│   └── js/                 # (9 files)
+├── .library/               # Generated data (DB, thumbnails, crops)
+└── [Source Image Folders]  # All other source image folders
+```
