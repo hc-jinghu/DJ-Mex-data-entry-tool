@@ -35,6 +35,13 @@ const API = {
         return this._fetch(`/api/folders/${id}`);
     },
 
+    updateFolderManualReviewed(folderId, manualReviewed) {
+        return this._fetch(`/api/folders/${folderId}/manual-reviewed`, {
+            method: 'PUT',
+            body: JSON.stringify({ manual_reviewed: manualReviewed }),
+        });
+    },
+
     // Images
     getImages(folderId, status = 'all') {
         return this._fetch(`/api/folders/${folderId}/images?status=${status}`);
@@ -50,6 +57,10 @@ const API = {
 
     fullImageUrl(id) {
         return `/api/images/${id}/full`;
+    },
+
+    rotateImage(id) {
+        return this._fetch(`/api/images/${id}/rotate`, { method: 'POST' });
     },
 
     renameImage(id, filename) {

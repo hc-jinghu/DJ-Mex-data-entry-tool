@@ -21,6 +21,8 @@ const Viewer = {
     _isOpen: false,
     _renaming: false,
     _magActive: false,
+    _rotating: false,
+    _itemCodes: null,
 
     POOL_SIZE: 5,
     // Magnifier: sample a 50x50 area relative to 1080p, display in a 250px lens
@@ -28,7 +30,7 @@ const Viewer = {
     MAG_REF_H: 1080,
     MAG_SIZE: 250,
 
-    init() {
+    async init() {
         this._overlay = document.getElementById('viewer-overlay');
         this._main = document.getElementById('viewer-main');
         this._container = document.getElementById('viewer-container');
@@ -43,6 +45,7 @@ const Viewer = {
         this._magnifier = document.getElementById('viewer-magnifier');
 
         document.getElementById('viewer-close').addEventListener('click', () => this.close());
+        document.getElementById('viewer-rotate-btn').addEventListener('click', () => this.rotateCurrent());
 
         // Magnifier mouse tracking
         this._main.addEventListener('mousemove', (e) => this._onMouseMove(e));
@@ -58,6 +61,14 @@ const Viewer = {
             img.style.display = 'none';
             this._container.appendChild(img);
             this._pool.push(img);
+        }
+
+        try {
+            const response = await fetch('/api/item_codes');
+            this._itemCodes = await response.json();
+        } catch (error) {
+            console.error('Error fetching item codes:', error);
+            this._itemCodes = {};
         }
     },
 
@@ -185,24 +196,180 @@ const Viewer = {
         }
 
         if (!ocr) {
-            this._ocrDetailEl.innerHTML = '<div class="viewer-no-ocr">No OCR result</div>';
+            this._ocrDetailEl.innerHTML = '<div class="viewer-no-ocr">No Metadata</div>';
             return;
         }
 
         this._ocrDetailEl.innerHTML = '';
+        const isReadonly = Grid._currentFolderManualReviewed;
 
         // Tag — editable
         this._ocrDetailEl.appendChild(
-            this._editableRow('tag', ocr.tag || '', imageId)
+            this._editableRow('tag', ocr.tag || '', imageId, isReadonly)
+        );
+
+        // Item — searchable dropdown
+        this._ocrDetailEl.appendChild(
+            this._itemDropdownRow('item', ocr.item || '', imageId, isReadonly)
         );
 
         // Scale weight — editable
         this._ocrDetailEl.appendChild(
-            this._editableRow('scale_weight', ocr.scale_weight != null ? String(ocr.scale_weight) : '', imageId)
+            this._editableRow('scale_weight', ocr.scale_weight != null ? String(ocr.scale_weight) : '', imageId, isReadonly)
         );
     },
 
-    _editableRow(field, value, imageId) {
+    _itemDropdownRow(field, selectedValue, imageId, isReadonly) {
+        const row = document.createElement('div');
+        row.className = 'ocr-prop';
+
+        const label = document.createElement('span');
+        label.className = 'ocr-prop-label';
+        label.textContent = field;
+
+        let displayValue = '-';
+        if (selectedValue) { // Only try to find description if selectedValue is not falsy
+            if (this._itemCodes && this._itemCodes[selectedValue]) {
+                displayValue = `${selectedValue} - ${this._itemCodes[selectedValue]}`;
+            } else {
+                displayValue = selectedValue;
+            }
+        }
+
+        const container = document.createElement('div');
+        container.className = 'ocr-item-container';
+        if (isReadonly) container.classList.add('grid-readonly');
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'ocr-item-input';
+        input.value = displayValue;
+        input.placeholder = isReadonly ? '' : 'Search...';
+        input.dataset.code = selectedValue || '';
+        input.autocomplete = 'off';
+        if (isReadonly) {
+            input.readOnly = true;
+            input.disabled = true;
+        }
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'ocr-item-dropdown hidden';
+
+        container.appendChild(input);
+        container.appendChild(dropdown);
+
+        if (isReadonly) {
+            row.appendChild(label);
+            row.appendChild(container);
+            return row;
+        }
+
+        const populate = (filter = '') => {
+            if (!this._itemCodes) return;
+            let html = '';
+            const term = filter.toLowerCase();
+            let first = true;
+            for (const [code, desc] of Object.entries(this._itemCodes)) {
+                const text = `${code} - ${desc}`;
+                if (text.toLowerCase().includes(term)) {
+                    const cls = first ? 'ocr-item-option selected' : 'ocr-item-option';
+                    html += `<div class="${cls}" data-code="${code}">${text}</div>`;
+                    first = false;
+                }
+            }
+            if (!html) {
+                html = '<div class="ocr-item-option" style="cursor:default; color:var(--text-muted);">No matches</div>';
+            }
+            dropdown.innerHTML = html;
+        };
+
+        const selectOption = async (code, text) => {
+            input.value = text;
+            input.dataset.code = code;
+            dropdown.classList.add('hidden');
+
+            try {
+                await API.updateOcrResult(imageId, { item: code });
+                if (Grid._ocrResults[imageId]) {
+                    Grid._ocrResults[imageId].item = code;
+                    // Refresh grid's metadata panel if it's showing this image
+                    if (OcrDetail._currentImageId === imageId) {
+                        OcrDetail.show(imageId);
+                    }
+                }
+                StatusFeed.success(`Updated item → ${code}`);
+            } catch (error) {
+                console.error('Error updating item code:', error);
+                StatusFeed.error(`Save failed: ${error.message}`);
+            }
+        };
+
+        input.addEventListener('focus', () => {
+            input.select();
+            populate('');
+            dropdown.classList.remove('hidden');
+        });
+
+        input.addEventListener('input', () => {
+            populate(input.value);
+            dropdown.classList.remove('hidden');
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                dropdown.classList.add('hidden');
+                // Revert input value on escape without selection
+                const savedCode = input.dataset.code;
+                let displayValue = '-';
+                if (savedCode) {
+                    if (this._itemCodes && this._itemCodes[savedCode]) {
+                        displayValue = `${savedCode} - ${this._itemCodes[savedCode]}`;
+                    } else {
+                        displayValue = savedCode;
+                    }
+                }
+                input.value = displayValue;
+                input.blur();
+            } else if (e.key === 'Enter') {
+                const firstOption = dropdown.querySelector('.ocr-item-option[data-code]');
+                if (firstOption) {
+                    selectOption(firstOption.dataset.code, firstOption.textContent);
+                    input.blur();
+                }
+            }
+        });
+
+        input.addEventListener('blur', () => {
+            setTimeout(() => {
+                dropdown.classList.add('hidden');
+                // Revert to saved value if not committed
+                const savedCode = input.dataset.code;
+                let displayValue = '-'; // Default to '-'
+                if (savedCode) { // Only try to find description if savedCode is not falsy
+                    if (this._itemCodes && this._itemCodes[savedCode]) {
+                        displayValue = `${savedCode} - ${this._itemCodes[savedCode]}`;
+                    } else {
+                        displayValue = savedCode;
+                    }
+                }
+                input.value = displayValue;
+            }, 150);
+        });
+
+        dropdown.addEventListener('mousedown', (e) => {
+            const option = e.target.closest('.ocr-item-option');
+            if (option && option.dataset.code) {
+                selectOption(option.dataset.code, option.textContent);
+            }
+        });
+
+        row.appendChild(label);
+        row.appendChild(container);
+        return row;
+    },
+
+    _editableRow(field, value, imageId, isReadonly) {
         const row = document.createElement('div');
         row.className = 'ocr-prop';
 
@@ -211,9 +378,16 @@ const Viewer = {
         label.textContent = field;
 
         const valSpan = document.createElement('span');
-        valSpan.className = 'ocr-prop-value ocr-editable';
+        valSpan.className = 'ocr-prop-value';
+        if (!isReadonly) valSpan.classList.add('ocr-editable');
         valSpan.textContent = value || '—';
-        valSpan.title = 'Click to edit';
+        if (!isReadonly) valSpan.title = 'Click to edit';
+
+        if (isReadonly) {
+            row.appendChild(label);
+            row.appendChild(valSpan);
+            return row;
+        }
 
         valSpan.addEventListener('click', () => {
             const input = document.createElement('input');
@@ -245,6 +419,10 @@ const Viewer = {
                     // Update grid cache
                     if (Grid._ocrResults[imageId]) {
                         Grid._ocrResults[imageId][field] = payload[field];
+                        // Refresh grid's metadata panel if it's showing this image
+                        if (OcrDetail._currentImageId === imageId) {
+                            OcrDetail.show(imageId);
+                        }
                     }
                     StatusFeed.success(`Updated ${field} → ${newVal || '(cleared)'}`);
 
@@ -299,18 +477,21 @@ const Viewer = {
     // ── TAB field cycling ────────────────────────────────────────
 
     focusNextField(reverse = false) {
-        const fields = Array.from(this._ocrDetailEl.querySelectorAll('.ocr-editable'));
+        // Focusable elements: .ocr-editable (spans) and .ocr-item-input (direct inputs)
+        const fields = Array.from(this._ocrDetailEl.querySelectorAll('.ocr-editable, .ocr-item-input'));
         if (fields.length === 0) return;
 
-        // Find which field has an active input (if any)
+        // Find which field is currently active
         let activeIdx = -1;
+        const activeEl = document.activeElement;
         fields.forEach((f, i) => {
-            if (f.querySelector('.ocr-edit-input')) activeIdx = i;
+            if (f === activeEl || f.contains(activeEl)) activeIdx = i;
         });
 
-        // Commit the current input via blur before moving
-        const activeInput = this._ocrDetailEl.querySelector('.ocr-edit-input');
-        if (activeInput) activeInput.blur();
+        // Blur current input to commit changes
+        if (activeEl && (activeEl.classList.contains('ocr-edit-input') || activeEl.classList.contains('ocr-item-input'))) {
+            activeEl.blur();
+        }
 
         // Move to next/prev field
         let nextIdx;
@@ -322,8 +503,15 @@ const Viewer = {
             if (nextIdx >= fields.length) nextIdx = 0;
         }
 
-        // Small delay to let blur/commit finish before clicking next
-        setTimeout(() => fields[nextIdx].click(), 50);
+        const nextField = fields[nextIdx];
+        // Small delay to let blur/commit finish before focusing next
+        setTimeout(() => {
+            if (nextField.classList.contains('ocr-editable')) {
+                nextField.click();
+            } else {
+                nextField.focus();
+            }
+        }, 50);
     },
 
     // ── Magnifier ──────────────────────────────────────────────
@@ -393,6 +581,10 @@ const Viewer = {
     // ── Rename ──────────────────────────────────────────────────
 
     startRename() {
+        if (Grid._currentFolderManualReviewed) {
+            StatusFeed.warn('Cannot rename files: this folder has completed manual review.');
+            return;
+        }
         const img = this._images[this._currentIndex];
         if (!img) return;
 
@@ -446,9 +638,50 @@ const Viewer = {
         });
     },
 
+    // ── Rotate ──────────────────────────────────────────────────
+
+    async rotateCurrent() {
+        if (this._rotating) return;
+        const img = this._images[this._currentIndex];
+        if (!img) return;
+
+        this._rotating = true;
+
+        try {
+            const result = await API.rotateImage(img.id);
+            img.width = result.width;
+            img.height = result.height;
+
+            // Invalidate all pool entries and cache-bust reload
+            const bust = '?t=' + Date.now();
+            this._pool.forEach(p => { delete p.dataset.loadedId; });
+
+            const visible = this._pool.find(p => p.style.display === 'block');
+            if (visible) {
+                visible.addEventListener('load', () => {
+                    if (this._magActive) this._setupMagBackground();
+                    this._rotating = false;
+                }, { once: true });
+                visible.src = API.fullImageUrl(img.id) + bust;
+                visible.dataset.loadedId = String(img.id);
+            } else {
+                this._rotating = false;
+            }
+
+            Grid.refreshThumbnail(img.id);
+        } catch (err) {
+            this._rotating = false;
+            StatusFeed.error(`Rotate failed: ${err.message}`);
+        }
+    },
+
     // ── Mark ────────────────────────────────────────────────────
 
     async markCurrentForDeletion() {
+        if (Grid._currentFolderManualReviewed) {
+            StatusFeed.warn('Cannot mark for deletion: this folder has completed manual review.');
+            return;
+        }
         const img = this._images[this._currentIndex];
         if (!img) return;
 

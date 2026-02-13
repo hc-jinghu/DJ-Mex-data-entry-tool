@@ -34,7 +34,7 @@
         <div id="right-panel" class="panel">
             <div id="ocr-detail" class="hidden">
                 <div class="ocr-detail-header">
-                    <span>OCR Result</span>
+                    <span>Metadata</span>
                     <span id="ocr-detail-close" title="Close">&times;</span>
                 </div>
                 <div id="ocr-detail-body"></div>
@@ -49,13 +49,16 @@
         <div id="viewer-main">
             <div id="viewer-close">&times;</div>
             <div id="viewer-counter"></div>
-            <div id="viewer-filename"></div>
+            <div id="viewer-bottom-bar">
+                <div id="viewer-filename"></div>
+                <button id="viewer-rotate-btn" title="Rotate 90° clockwise (R)">&#x21BB;</button>
+            </div>
             <div id="viewer-status-badge" class="hidden"></div>
             <div id="viewer-container"></div>
             <div id="viewer-magnifier" class="hidden"></div>
         </div>
         <div id="viewer-side">
-            <div class="viewer-side-header">OCR Result</div>
+            <div class="viewer-side-header">Metadata</div>
             <div id="viewer-ocr-detail"></div>
             <div class="viewer-side-header">Tag ROI</div>
             <div id="viewer-tagroi-wrap" class="viewer-crop-wrap">

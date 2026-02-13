@@ -70,24 +70,6 @@ const App = {
                 item.classList.add('active');
             }
 
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.className = 'folder-check';
-            const hlKey = `folder-hl:${folder.path}`;
-            if (localStorage.getItem(hlKey) === '1') {
-                checkbox.checked = true;
-                item.classList.add('folder-highlighted');
-            }
-            checkbox.addEventListener('click', (e) => e.stopPropagation());
-            checkbox.addEventListener('change', () => {
-                item.classList.toggle('folder-highlighted', checkbox.checked);
-                if (checkbox.checked) {
-                    localStorage.setItem(hlKey, '1');
-                } else {
-                    localStorage.removeItem(hlKey);
-                }
-            });
-
             const name = document.createElement('span');
             name.className = 'folder-name';
             name.textContent = folder.name;
@@ -96,7 +78,6 @@ const App = {
             count.className = 'folder-count';
             count.textContent = folder.image_count;
 
-            item.appendChild(checkbox);
             item.appendChild(name);
             item.appendChild(count);
 
@@ -153,7 +134,64 @@ const App = {
         if (!folder.imported) return;
 
         this._activeFolderId = folder.id;
-        document.getElementById('grid-title').textContent = folder.name;
+        
+        const gridTitleEl = document.getElementById('grid-title');
+        gridTitleEl.innerHTML = ''; // Clear existing content
+
+        const folderNameSpan = document.createElement('span');
+        folderNameSpan.textContent = folder.name;
+        gridTitleEl.appendChild(folderNameSpan);
+
+        const modeIndicatorSpan = document.createElement('span');
+        modeIndicatorSpan.id = 'grid-mode-indicator';
+        gridTitleEl.appendChild(modeIndicatorSpan);
+
+        // Add manual reviewed chip
+        const manualReviewedChip = document.createElement('span');
+        manualReviewedChip.className = 'manual-reviewed-chip';
+        manualReviewedChip.title = 'Toggle manual review status for this folder';
+        
+        const updateChipStyle = (isChecked) => {
+            manualReviewedChip.classList.toggle('checked', isChecked);
+            manualReviewedChip.classList.toggle('unchecked', !isChecked);
+            manualReviewedChip.textContent = isChecked ? 'Manually Reviewed' : 'awaiting manual review';
+        };
+
+        updateChipStyle(folder.manual_reviewed);
+
+        manualReviewedChip.addEventListener('click', async (e) => {
+            e.stopPropagation(); // Prevent folder click event if any
+            const newStatus = !folder.manual_reviewed;
+            try {
+                await API.updateFolderManualReviewed(folder.id, newStatus);
+                folder.manual_reviewed = newStatus; // Update local state
+                
+                // Also update Grid's state if this is the active folder
+                if (Grid.currentFolderId === folder.id) {
+                    Grid._currentFolderManualReviewed = newStatus;
+                    Grid.render();
+                    
+                    // If Viewer is open, we need to refresh its current view too
+                    if (Viewer.isOpen) {
+                        Viewer._loadCurrent();
+                    }
+                }
+
+                updateChipStyle(newStatus); // Update chip style immediately
+                if (newStatus) {
+                    StatusFeed.info(`Folder "${folder.name}" marked as manually reviewed.`);
+                } else {
+                    StatusFeed.info(`Folder "${folder.name}" unmarked as manually reviewed.`);
+                }
+            } catch (err) {
+                StatusFeed.error(`Failed to update manual review status: ${err.message}`);
+                // Revert chip state on error
+                updateChipStyle(folder.manual_reviewed); 
+            }
+        });
+
+        gridTitleEl.appendChild(manualReviewedChip);
+
 
         // Update active state in sidebar
         document.querySelectorAll('.folder-item').forEach((item, idx) => {
@@ -176,6 +214,12 @@ const App = {
     },
 
     async startCulling() {
+        const folder = this._folders.find(f => f.id === Grid.currentFolderId);
+        if (folder && folder.manual_reviewed) {
+            StatusFeed.warn('Cannot start culling: this folder has completed manual review.');
+            return;
+        }
+
         const selected = Grid.getSelectedImages();
         if (selected.length < 2) {
             StatusFeed.warn('Select at least 2 images to start culling');
@@ -199,12 +243,17 @@ const App = {
         // Get first image URL for reference
         const refUrl = API.fullImageUrl(marked[0].id);
 
-        // Fetch folder's saved ROI
+        // Fetch folder's saved ROI and manual_reviewed status
         let savedCells = [];
+        let folderData;
         try {
-            const folder = await API.getFolder(this._activeFolderId);
-            if (folder.ocr_roi) {
-                savedCells = JSON.parse(folder.ocr_roi);
+            folderData = await API.getFolder(this._activeFolderId);
+            if (folderData.ocr_roi) {
+                savedCells = JSON.parse(folderData.ocr_roi);
+            }
+            if (folderData.manual_reviewed) {
+                StatusFeed.warn('Read Only: This folder is protected.');
+                return;
             }
         } catch (_) { /* ignore */ }
 
@@ -297,6 +346,12 @@ const App = {
     },
 
     async executeActions() {
+        const folder = this._folders.find(f => f.id === Grid.currentFolderId);
+        if (folder && folder.manual_reviewed) {
+            StatusFeed.warn('Cannot execute deletions: this folder has completed manual review.');
+            return;
+        }
+
         const pending = Grid.images.filter(i => i.status === 'marked_delete');
         if (pending.length === 0) {
             StatusFeed.info('No pending deletions');

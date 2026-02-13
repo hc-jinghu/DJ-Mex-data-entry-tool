@@ -16,6 +16,7 @@ const Grid = {
     _mode: 'normal',  // 'normal' | 'delete' | 'ocr'
     _ocrResults: {},  // image_id -> ocr result
     _ocrProcessingIds: new Set(),  // image IDs currently being OCR-processed
+    _currentFolderManualReviewed: false, // New property to store folder's manual_reviewed status
 
     init() {
         this._gridEl = document.getElementById('thumbnail-grid');
@@ -49,6 +50,21 @@ const Grid = {
     // ── Mode management ────────────────────────────────────────
 
     setMode(mode) {
+        if (mode === 'ocr' || mode === 'delete') {
+            const currentFolderId = this._currentFolderId;
+            if (currentFolderId) {
+                try {
+                    const folder = App._folders.find(f => f.id === currentFolderId);
+                    if (folder && folder.manual_reviewed) {
+                        StatusFeed.warn(`Cannot enter ${mode.toUpperCase()} mode: this folder has completed manual review.`);
+                        return; // Prevent setting mode
+                    }
+                } catch (err) {
+                    StatusFeed.error(`Failed to check folder status for ${mode.toUpperCase()} mode.`);
+                    return; // Prevent setting mode on error
+                }
+            }
+        }
         this._mode = mode;
         this._updateModeIndicator();
 
@@ -62,21 +78,19 @@ const Grid = {
     },
 
     _updateModeIndicator() {
-        const title = document.getElementById('grid-title');
-        // Strip any existing mode suffix
-        const base = title.textContent.replace(/ — .*$/, '');
+        const modeIndicator = document.getElementById('grid-mode-indicator');
+        if (!modeIndicator) return; // Should not happen if App._selectFolder runs first
+
+        // Clear existing content and classes
+        modeIndicator.textContent = '';
+        modeIndicator.classList.remove('mode-delete', 'mode-ocr');
 
         if (this._mode === 'delete') {
-            title.textContent = base + ' — DELETE MODE';
-            title.classList.add('mode-delete');
-            title.classList.remove('mode-ocr');
+            modeIndicator.textContent = ' — DELETE MODE';
+            modeIndicator.classList.add('mode-delete');
         } else if (this._mode === 'ocr') {
-            title.textContent = base + ' — OCR MODE';
-            title.classList.remove('mode-delete');
-            title.classList.add('mode-ocr');
-        } else {
-            title.textContent = base;
-            title.classList.remove('mode-delete', 'mode-ocr');
+            modeIndicator.textContent = ' — OCR MODE';
+            modeIndicator.classList.add('mode-ocr');
         }
     },
 
@@ -122,6 +136,8 @@ const Grid = {
     },
 
     async toggleFocusedMark() {
+        if (this._mode === 'normal' || this._currentFolderManualReviewed) return;
+
         const cards = this._gridEl.children;
         if (this._focusIndex < 0 || this._focusIndex >= cards.length) return;
 
@@ -275,6 +291,10 @@ const Grid = {
     get isRenaming() { return this._renaming; },
 
     startRename() {
+        if (this._currentFolderManualReviewed) {
+            StatusFeed.warn('Cannot rename files: this folder has completed manual review.');
+            return;
+        }
         const cards = this._gridEl.children;
         if (this._focusIndex < 0 || this._focusIndex >= cards.length) return;
 
@@ -385,11 +405,15 @@ const Grid = {
         this._mode = 'normal';
         this._renaming = false;
         this._ocrResults = {};
+        this._currentFolderManualReviewed = false; // Reset before loading new folder
         this._updateModeIndicator();
         this._updateCullButton();
         document.getElementById('btn-export').style.display = 'none';
 
         try {
+            const folderData = await API.getFolder(folderId); // Fetch folder data including manual_reviewed status
+            this._currentFolderManualReviewed = folderData.manual_reviewed;
+
             this._images = (await API.getImages(folderId, 'all')).filter(i => i.status !== 'deleted');
             this.render();
             StatusFeed.info(`Loaded ${this._images.length} images`);
@@ -413,8 +437,17 @@ const Grid = {
             card.dataset.imageId = img.id;
             card.dataset.index = index;
 
-            if (img.status !== 'active') {
-                card.classList.add(`status-${img.status}`);
+            // Only apply status classes if the folder is NOT manual_reviewed
+            if (!this._currentFolderManualReviewed) {
+                if (img.status !== 'active') {
+                    card.classList.add(`status-${img.status}`);
+                }
+            } else {
+                // If manual_reviewed, ensure no OCR specific classes are added,
+                // but still allow delete status if applicable
+                if (img.status === 'marked_delete') {
+                    card.classList.add('status-marked_delete');
+                }
             }
             if (this._selected.has(img.id)) {
                 card.classList.add('selected');
@@ -549,6 +582,7 @@ const Grid = {
     get isOcrProcessing() { return this._ocrProcessingIds.size > 0; },
 
     setOcrProcessing(ids) {
+        if (this._currentFolderManualReviewed) return; // Do not show processing if folder is manual reviewed
         ids.forEach(id => {
             this._ocrProcessingIds.add(id);
             const card = this._gridEl.querySelector(`[data-image-id="${id}"]`);
@@ -570,6 +604,15 @@ const Grid = {
             btn.textContent = `Execute ${pendingCount} Deletion(s)`;
         } else {
             btn.style.display = 'none';
+        }
+    },
+
+    refreshThumbnail(imageId) {
+        const card = this._gridEl.querySelector(`[data-image-id="${imageId}"]`);
+        if (!card) return;
+        const imgEl = card.querySelector('img');
+        if (imgEl) {
+            imgEl.src = API.thumbnailUrl(imageId) + '?t=' + Date.now();
         }
     },
 
@@ -595,7 +638,14 @@ const Grid = {
                         nameEl.classList.add('thumb-renamed');
                     }
                 }
-                if (newStatus !== 'active') card.classList.add(`status-${newStatus}`);
+                if (newStatus !== 'active') {
+                    // Only apply status-marked_ocr if the folder is NOT manual_reviewed
+                    if (this._currentFolderManualReviewed && newStatus === 'marked_ocr') {
+                        // Do not add ocr status
+                    } else {
+                        card.classList.add(`status-${newStatus}`);
+                    }
+                }
             }
             this._updateExecuteButton();
         }

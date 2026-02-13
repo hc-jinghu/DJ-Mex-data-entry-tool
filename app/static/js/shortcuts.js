@@ -154,6 +154,11 @@ const Shortcuts = {
                 e.preventDefault();
                 Viewer.markCurrentForDeletion();
                 break;
+            case 'r':
+            case 'R':
+                e.preventDefault();
+                Viewer.rotateCurrent();
+                break;
             case 'z':
             case 'Z':
                 e.preventDefault();

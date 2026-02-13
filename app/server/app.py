@@ -3,10 +3,12 @@
 import atexit
 import json
 import os
+import sys
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
 from .database import get_connection, init_db, row_to_dict, rows_to_dicts
+from .importer import import_folder as do_import, IMAGE_EXTENSIONS
 
 LIBRARY_ROOT = os.getcwd()
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # app/
@@ -85,6 +87,17 @@ def create_app():
     def index():
         return send_from_directory(app.static_folder, 'index.html')
 
+    @app.route('/api/item_codes', methods=['GET'])
+    def get_item_codes():
+        """Get the item codes dictionary."""
+        item_codes_path = os.path.join(LIBRARY_ROOT, '.library', 'item_codes.json')
+        if not os.path.exists(item_codes_path):
+            return jsonify({'error': 'item_codes.json not found'}), 404
+
+        with open(item_codes_path, 'r') as f:
+            item_codes = json.load(f)
+        return jsonify(item_codes)
+
     # ── Folder endpoints ────────────────────────────────────────────
 
     @app.route('/api/folders', methods=['GET'])
@@ -99,6 +112,8 @@ def create_app():
         imported = rows_to_dicts(conn.execute(
             "SELECT * FROM folders ORDER BY name"
         ).fetchall())
+        print(f"DEBUG: list_folders - Imported folders from DB: {imported}")
+        sys.stdout.flush()
 
         # Build a set of inode->folder_id from DB for rename detection
         db_inodes = {}
@@ -124,6 +139,8 @@ def create_app():
             ]
             if image_files:
                 disk_dirs.append((entry, full_path, image_files))
+        print(f"DEBUG: list_folders - Disk directories found: {[d[0] for d in disk_dirs]}")
+        sys.stdout.flush()
 
         matched_ids = set()
         all_folders = []
@@ -162,7 +179,11 @@ def create_app():
 
             if match:
                 matched_ids.add(match['id'])
-                all_folders.append({**match, 'imported': True})
+                # Ensure manual_reviewed is present, default to False if not in DB (old records)
+                match_dict = {**match, 'imported': True}
+                if 'manual_reviewed' not in match_dict:
+                    match_dict['manual_reviewed'] = False
+                all_folders.append(match_dict)
             else:
                 all_folders.append({
                     'id': None,
@@ -170,9 +191,12 @@ def create_app():
                     'path': entry,
                     'image_count': len(image_files),
                     'imported': False,
+                    'manual_reviewed': False, # Default for unimported folders
                 })
 
         conn.close()
+        print(f"DEBUG: list_folders - Final all_folders to return: {all_folders}")
+        sys.stdout.flush()
         return jsonify(all_folders)
 
     @app.route('/api/folders/import', methods=['POST'])
@@ -201,17 +225,51 @@ def create_app():
     def get_folder(folder_id):
         conn = get_connection()
         folder = row_to_dict(conn.execute(
-            "SELECT * FROM folders WHERE id = ?", (folder_id,)
+            "SELECT *, manual_reviewed FROM folders WHERE id = ?", (folder_id,)
         ).fetchone())
         conn.close()
         if not folder:
             return jsonify({'error': 'not found'}), 404
+        # Ensure manual_reviewed is present, default to False if not in DB (old records)
+        if 'manual_reviewed' not in folder:
+            folder['manual_reviewed'] = False
         return jsonify(folder)
+
+    @app.route('/api/folders/<int:folder_id>/manual-reviewed', methods=['PUT'])
+    def update_manual_reviewed(folder_id):
+        data = request.get_json()
+        manual_reviewed = data.get('manual_reviewed')
+        if manual_reviewed is None or not isinstance(manual_reviewed, bool):
+            return jsonify({'error': 'manual_reviewed (boolean) is required'}), 400
+
+        conn = get_connection()
+        conn.execute(
+            "UPDATE folders SET manual_reviewed = ? WHERE id = ?",
+            (manual_reviewed, folder_id)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
 
     # ── Image endpoints ─────────────────────────────────────────────
 
     @app.route('/api/folders/<int:folder_id>/images', methods=['GET'])
     def list_images(folder_id):
+        # Sync folder with disk before returning images
+        conn = get_connection()
+        folder = conn.execute(
+            "SELECT path FROM folders WHERE id = ?", (folder_id,)
+        ).fetchone()
+        conn.close()
+        if folder:
+            folder_path = folder['path']
+            full_path = os.path.join(LIBRARY_ROOT, folder_path)
+            if os.path.isdir(full_path):
+                try:
+                    do_import(LIBRARY_ROOT, folder_path)
+                except Exception as e:
+                    print(f"Sync error for folder {folder_path}: {e}")
+
         status_filter = request.args.get('status', 'active')
         conn = get_connection()
         if status_filter == 'all':
@@ -267,6 +325,57 @@ def create_app():
         if not os.path.exists(full_path):
             return jsonify({'error': 'file missing'}), 404
         return send_file(full_path)
+
+    @app.route('/api/images/<int:image_id>/rotate', methods=['POST'])
+    def rotate_image(image_id):
+        """Rotate an image 90 degrees clockwise on disk (full image + thumbnail)."""
+        from PIL import Image as PILImage
+
+        conn = get_connection()
+        image = row_to_dict(conn.execute(
+            "SELECT * FROM images WHERE id = ?", (image_id,)
+        ).fetchone())
+        if not image:
+            conn.close()
+            return jsonify({'error': 'not found'}), 404
+
+        full_path = os.path.join(LIBRARY_ROOT, image['filepath'])
+        if not os.path.exists(full_path):
+            conn.close()
+            return jsonify({'error': 'file missing'}), 404
+
+        try:
+            from PIL import ImageOps
+
+            # Rotate full image — normalize EXIF orientation first so
+            # the browser and pixel data agree, then rotate.
+            with PILImage.open(full_path) as img:
+                img = ImageOps.exif_transpose(img)
+                rotated = img.transpose(PILImage.Transpose.ROTATE_270)
+                rotated.save(full_path, quality=95)
+                new_width, new_height = rotated.size
+
+            # Rotate thumbnail if it exists
+            if image['thumbnail_path']:
+                thumb_path = os.path.join(LIBRARY_ROOT, '.library', 'thumbnails', image['thumbnail_path'])
+                if os.path.exists(thumb_path):
+                    with PILImage.open(thumb_path) as thumb:
+                        thumb = ImageOps.exif_transpose(thumb)
+                        rotated_thumb = thumb.transpose(PILImage.Transpose.ROTATE_270)
+                        rotated_thumb.save(thumb_path, quality=85)
+
+            # Update dimensions in DB
+            conn.execute(
+                "UPDATE images SET width = ?, height = ?, modified_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_width, new_height, image_id)
+            )
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True, 'width': new_width, 'height': new_height})
+
+        except Exception as e:
+            conn.close()
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/images/<int:image_id>/rename', methods=['PUT'])
     def rename_image(image_id):
@@ -621,7 +730,7 @@ def create_app():
 
         fields = []
         values = []
-        for key in ('tag', 'scale_weight', 'handwritten_weight', 'status'):
+        for key in ('tag', 'scale_weight', 'handwritten_weight', 'status', 'item'):
             if key in data:
                 fields.append(f"{key} = ?")
                 values.append(data[key])
@@ -665,7 +774,7 @@ def create_app():
         tag_pattern = re.compile(r'^[A-Za-z]{3}\d{3}$')
 
         all_rows = rows_to_dicts(conn.execute(
-            """SELECT o.tag, o.scale_weight
+            """SELECT o.tag, o.scale_weight, o.item
                FROM ocr_results o
                JOIN images i ON o.image_id = i.id
                WHERE i.folder_id = ?
@@ -710,7 +819,9 @@ def create_app():
 
         # Data rows
         for i, r in enumerate(rows, 2):
-            # A: Item (blank, text format already applied above)
+            # A: Item
+            if r['item']:
+                ws.cell(row=i, column=1, value=r['item'])
             # B: Tag
             ws.cell(row=i, column=2, value=r['tag'])
             # C: Gross
