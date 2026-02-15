@@ -22,9 +22,9 @@ def _remove_thumbnail(library_root, folder_id, filename):
 
 
 def _recompute_sort_order(conn, folder_id):
-    """Renumber sort_order for all images in a folder by filename."""
+    """Renumber sort_order for all images in a folder by original filename."""
     rows = conn.execute(
-        "SELECT id FROM images WHERE folder_id = ? ORDER BY filename",
+        "SELECT id FROM images WHERE folder_id = ? ORDER BY COALESCE(original_filename, filename)",
         (folder_id,)
     ).fetchall()
     for idx, row in enumerate(rows):
@@ -79,6 +79,22 @@ def import_folder(library_root, folder_path):
         folder_id = cur.lastrowid
         conn.commit()
 
+    # Purge ghost 'deleted' rows — execute_pending_actions marks them as
+    # 'deleted' but keeps the row, which blocks the UNIQUE(folder_id, filename)
+    # index and prevents re-adding files with the same name.
+    deleted_ids = [r['id'] for r in conn.execute(
+        "SELECT id FROM images WHERE folder_id = ? AND status = 'deleted'",
+        (folder_id,)
+    ).fetchall()]
+    if deleted_ids:
+        ph = ','.join('?' for _ in deleted_ids)
+        conn.execute(f"DELETE FROM ocr_results WHERE image_id IN ({ph})", deleted_ids)
+        conn.execute(
+            f"UPDATE culling_sessions SET picked_image_id = NULL WHERE picked_image_id IN ({ph})",
+            deleted_ids
+        )
+        conn.execute(f"DELETE FROM images WHERE id IN ({ph})", deleted_ids)
+
     # Build DB state: { filename: {id, inode, file_size, width, height} }
     db_rows = conn.execute(
         "SELECT id, filename, inode, file_size, width, height FROM images WHERE folder_id = ?",
@@ -128,14 +144,15 @@ def import_folder(library_root, folder_path):
         thumb_rel = f"{folder_id}/{thumb_filename}" if thumb_filename else None
         width, height = get_image_dimensions(source_path)
         filepath = os.path.join(folder_path, filename)
+        original_filename = os.path.splitext(filename)[0]
 
         conn.execute(
             """INSERT INTO images
                (folder_id, filename, filepath, thumbnail_path, width, height,
-                file_size, inode, sort_order, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'active')""",
+                file_size, inode, sort_order, status, original_filename)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'active', ?)""",
             (folder_id, filename, filepath, thumb_rel,
-             width, height, file_size, inode)
+             width, height, file_size, inode, original_filename)
         )
         added += 1
 
@@ -162,7 +179,20 @@ def import_folder(library_root, folder_path):
             )
             conn.execute("DELETE FROM ocr_results WHERE image_id = ?", (img_id,))
             updated += 1
-        # else: inode+size unchanged → file is byte-identical, skip
+        else:
+            # inode+size unchanged → content is the same, but thumbnail may be missing
+            base, _ = os.path.splitext(filename)
+            thumb_path = os.path.join(thumb_dir, f"{base}_thumb.jpg")
+            if not os.path.exists(thumb_path):
+                generate_thumbnail(source_path, thumb_dir, filename)
+
+    # Create stub ocr_results for images that don't have one yet
+    conn.execute(
+        """INSERT OR IGNORE INTO ocr_results (image_id, status)
+           SELECT id, 'pending' FROM images
+           WHERE folder_id = ? AND id NOT IN (SELECT image_id FROM ocr_results)""",
+        (folder_id,)
+    )
 
     # Recompute sort order and update folder image count
     _recompute_sort_order(conn, folder_id)

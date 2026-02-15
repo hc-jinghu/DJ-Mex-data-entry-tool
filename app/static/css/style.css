@@ -145,6 +145,18 @@ body {
     color: var(--text-muted);
 }
 
+.badge-readonly {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.badge-importing {
+    background: var(--accent);
+    color: #fff;
+    animation: sync-pulse 1.2s ease-in-out infinite;
+}
+
 /* ── OCR Progress Bar ────────────────────────────────────── */
 #ocr-progress {
     padding: 4px 12px 6px;
@@ -943,6 +955,45 @@ body {
     color: #fff;
 }
 
+/* ── Sync Overlay (blocks all input during folder sync) ──── */
+#sync-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 2000;
+    cursor: wait;
+}
+
+#sync-overlay.hidden { display: none; }
+
+/* Gray out all buttons and make them unclickable while syncing */
+#app.syncing .btn,
+#app.syncing .folder-item,
+#app.syncing .badge-import,
+#app.syncing input[type="radio"],
+#app.syncing .manual-reviewed-chip {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+#sync-loading-message {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+
+@keyframes sync-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
+#sync-loading-message span {
+    animation: sync-pulse 1.2s ease-in-out infinite;
+}
+
 /* Manual Reviewed Chip in Grid Title */
 .manual-reviewed-chip {
     display: inline-flex;
@@ -963,4 +1014,17 @@ body {
 
 .manual-reviewed-chip.unchecked {
     background: var(--danger); /* Red background when unchecked */
+}
+
+.total-gross-weight {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+    color: #fff;
+    background: #555;
+    font-size: 14px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    user-select: none;
 }

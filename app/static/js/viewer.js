@@ -22,6 +22,7 @@ const Viewer = {
     _renaming: false,
     _magActive: false,
     _rotating: false,
+    _cacheBust: {},  // imageId -> timestamp, set on rotate to defeat browser cache
     _itemCodes: null,
 
     POOL_SIZE: 5,
@@ -123,11 +124,13 @@ const Viewer = {
         indices.forEach((imgIdx, poolIdx) => {
             if (poolIdx >= this._pool.length) return;
             const poolImg = this._pool[poolIdx];
-            const url = API.fullImageUrl(this._images[imgIdx].id);
+            const imgId = this._images[imgIdx].id;
+            let url = API.fullImageUrl(imgId);
+            if (this._cacheBust[imgId]) url += '?t=' + this._cacheBust[imgId];
 
-            if (poolImg.dataset.loadedId !== String(this._images[imgIdx].id)) {
+            if (poolImg.dataset.loadedId !== String(imgId) + (this._cacheBust[imgId] || '')) {
                 poolImg.src = url;
-                poolImg.dataset.loadedId = String(this._images[imgIdx].id);
+                poolImg.dataset.loadedId = String(imgId) + (this._cacheBust[imgId] || '');
             }
 
             if (imgIdx === this._currentIndex) {
@@ -202,6 +205,21 @@ const Viewer = {
 
         this._ocrDetailEl.innerHTML = '';
         const isReadonly = Grid._currentFolderManualReviewed;
+        const isPending = ocr.status === 'pending';
+
+        // Show original filename if different from current
+        if (ocr.original_filename) {
+            const currentBase = (ocr.filename || '').replace(/\.[^.]+$/, '');
+            if (ocr.original_filename !== currentBase) {
+                const origRow = document.createElement('div');
+                origRow.className = 'ocr-prop';
+                origRow.innerHTML = `<span class="ocr-prop-label">original</span><span class="ocr-prop-value" style="color:var(--text-muted)">${ocr.original_filename}</span>`;
+                this._ocrDetailEl.appendChild(origRow);
+            }
+        }
+
+        // Skip tag/item/scale_weight if image hasn't been OCR'd yet
+        if (isPending) return;
 
         // Tag — editable
         this._ocrDetailEl.appendChild(
@@ -653,17 +671,24 @@ const Viewer = {
             img.height = result.height;
 
             // Invalidate all pool entries and cache-bust reload
-            const bust = '?t=' + Date.now();
+            const bust = Date.now();
+            this._cacheBust[img.id] = bust;
             this._pool.forEach(p => { delete p.dataset.loadedId; });
 
             const visible = this._pool.find(p => p.style.display === 'block');
             if (visible) {
+                // Instant visual feedback: CSS rotate while the real image loads
+                visible.style.transition = 'transform 0.15s ease';
+                visible.style.transform = 'rotate(90deg)';
+
                 visible.addEventListener('load', () => {
+                    visible.style.transition = '';
+                    visible.style.transform = '';
                     if (this._magActive) this._setupMagBackground();
                     this._rotating = false;
                 }, { once: true });
-                visible.src = API.fullImageUrl(img.id) + bust;
-                visible.dataset.loadedId = String(img.id);
+                visible.src = API.fullImageUrl(img.id) + '?t=' + bust;
+                visible.dataset.loadedId = String(img.id) + bust;
             } else {
                 this._rotating = false;
             }

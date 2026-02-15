@@ -16,6 +16,12 @@ const Shortcuts = {
     },
 
     _handle(e) {
+        // Block all keyboard shortcuts while syncing
+        if (Grid.isSyncing) {
+            e.preventDefault();
+            return;
+        }
+
         // Allow Tab through to viewer handler even from OCR edit inputs
         const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
         if (inInput && e.key !== 'Tab') return;

@@ -95,6 +95,25 @@ def init_db():
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    try:
+        conn.execute("ALTER TABLE images ADD COLUMN original_filename TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Backfill original_filename from current filename (strip extension)
+    rows = conn.execute(
+        "SELECT id, filename FROM images WHERE original_filename IS NULL"
+    ).fetchall()
+    if rows:
+        for row in rows:
+            base = os.path.splitext(row['filename'])[0]
+            conn.execute(
+                "UPDATE images SET original_filename = ? WHERE id = ?",
+                (base, row['id'])
+            )
+        conn.commit()
+
     conn.close()
 
 

@@ -191,7 +191,7 @@ def create_app():
                     'path': entry,
                     'image_count': len(image_files),
                     'imported': False,
-                    'manual_reviewed': False, # Default for unimported folders
+                    'manual_reviewed': False,
                 })
 
         conn.close()
@@ -664,11 +664,11 @@ def create_app():
         """Get all OCR results for images in a folder."""
         conn = get_connection()
         results = rows_to_dicts(conn.execute(
-            """SELECT o.*, i.filename, i.filepath
+            """SELECT o.*, i.filename, i.filepath, i.original_filename
                FROM ocr_results o
                JOIN images i ON o.image_id = i.id
                WHERE i.folder_id = ?
-               ORDER BY o.image_id""",
+               ORDER BY i.sort_order""",
             (folder_id,)
         ).fetchall())
         conn.close()
@@ -679,7 +679,7 @@ def create_app():
         """Get OCR result for a single image."""
         conn = get_connection()
         result = row_to_dict(conn.execute(
-            """SELECT o.*, i.filename, i.filepath
+            """SELECT o.*, i.filename, i.filepath, i.original_filename
                FROM ocr_results o
                JOIN images i ON o.image_id = i.id
                WHERE o.image_id = ?""",

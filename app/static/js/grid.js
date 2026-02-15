@@ -386,10 +386,30 @@ const Grid = {
             this._ocrResults = {};
             results.forEach(r => { this._ocrResults[r.image_id] = r; });
             this._updateOcrBadges();
-            // Show export button if there are OCR results
-            document.getElementById('btn-export').style.display = results.length > 0 ? '' : 'none';
+            // Show export button only if manual_reviewed and there are tagged results
+            const hasTagged = results.some(r => r.tag);
+            document.getElementById('btn-export').style.display =
+                (this._currentFolderManualReviewed && hasTagged) ? '' : 'none';
+            App.updateTotalWeight();
         } catch (err) {
             // OCR results are optional, don't block
+        }
+    },
+
+    _syncing: false,
+    get isSyncing() { return this._syncing; },
+
+    _setSyncing(active) {
+        this._syncing = active;
+        const app = document.getElementById('app');
+        const overlay = document.getElementById('sync-overlay');
+        if (active) {
+            app.classList.add('syncing');
+            overlay.classList.remove('hidden');
+            this._gridEl.innerHTML = '<div id="sync-loading-message"><span>Syncing folder...</span></div>';
+        } else {
+            app.classList.remove('syncing');
+            overlay.classList.add('hidden');
         }
     },
 
@@ -410,16 +430,21 @@ const Grid = {
         this._updateCullButton();
         document.getElementById('btn-export').style.display = 'none';
 
+        this._setSyncing(true);
+        StatusFeed.info('Syncing folder with disk...');
+
         try {
             const folderData = await API.getFolder(folderId); // Fetch folder data including manual_reviewed status
             this._currentFolderManualReviewed = folderData.manual_reviewed;
 
             this._images = (await API.getImages(folderId, 'all')).filter(i => i.status !== 'deleted');
+            this._setSyncing(false);
             this.render();
             StatusFeed.info(`Loaded ${this._images.length} images`);
             // Load OCR results after render
             this.loadOcrResults();
         } catch (err) {
+            this._setSyncing(false);
             StatusFeed.error(`Failed to load images: ${err.message}`);
         }
     },

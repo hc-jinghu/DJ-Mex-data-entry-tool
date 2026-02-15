@@ -4,6 +4,7 @@
 const App = {
     _folders: [],
     _activeFolderId: null,
+    _importingPaths: new Set(),
 
     async init() {
         StatusFeed.init();
@@ -50,12 +51,47 @@ const App = {
                 const imported = this._folders.find(f => f.imported);
                 if (imported) {
                     this._selectFolder(imported);
-                } else if (this._folders.length > 0) {
-                    this._selectFolder(this._folders[0]);
                 }
+            }
+
+            // Auto-import unimported folders in the background
+            const unimported = this._folders.filter(f => !f.imported && !this._importingPaths.has(f.path));
+            if (unimported.length > 0) {
+                this._backgroundImport(unimported);
             }
         } catch (err) {
             StatusFeed.error(`Failed to load folders: ${err.message}`);
+        }
+    },
+
+    async _backgroundImport(folders) {
+        for (const folder of folders) {
+            if (this._importingPaths.has(folder.path)) continue;
+            this._importingPaths.add(folder.path);
+            this._renderFolderList();
+            StatusFeed.info(`Importing ${folder.name}...`);
+
+            try {
+                const result = await API.importFolder(folder.path);
+                this._importingPaths.delete(folder.path);
+
+                // Update the folder entry in-place
+                folder.imported = true;
+                folder.id = result.folder_id;
+                folder.image_count = result.total;
+                StatusFeed.success(`Imported ${folder.name} (${result.total} images)`);
+            } catch (err) {
+                this._importingPaths.delete(folder.path);
+                StatusFeed.error(`Import failed for ${folder.name}: ${err.message}`);
+            }
+
+            this._renderFolderList();
+
+            // If user is viewing this folder, load it now
+            if (this._activeFolderId === folder.path) {
+                this._activeFolderId = folder.id;
+                this._selectFolder(folder);
+            }
         }
     },
 
@@ -66,7 +102,7 @@ const App = {
         this._folders.forEach(folder => {
             const item = document.createElement('div');
             item.className = 'folder-item';
-            if (folder.id === this._activeFolderId) {
+            if ((folder.id && folder.id === this._activeFolderId) || folder.path === this._activeFolderId) {
                 item.classList.add('active');
             }
 
@@ -81,24 +117,22 @@ const App = {
             item.appendChild(name);
             item.appendChild(count);
 
-            if (folder.imported) {
+            if (this._importingPaths.has(folder.path)) {
                 const badge = document.createElement('span');
-                badge.className = 'folder-badge badge-imported';
-                badge.textContent = 'OK';
+                badge.className = 'folder-badge badge-importing';
+                badge.textContent = 'Importing';
                 item.appendChild(badge);
-            } else {
+            } else if (folder.manual_reviewed) {
                 const badge = document.createElement('span');
-                badge.className = 'folder-badge badge-import';
-                badge.textContent = 'Import';
-                badge.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this._importFolder(folder);
-                });
+                badge.className = 'folder-badge badge-readonly';
+                badge.textContent = 'Read Only';
                 item.appendChild(badge);
             }
 
             item.addEventListener('click', () => {
-                if (folder.imported) {
+                if (this._importingPaths.has(folder.path)) {
+                    this._showImportingMessage(folder);
+                } else if (folder.imported) {
                     this._selectFolder(folder);
                 } else {
                     this._importFolder(folder);
@@ -128,6 +162,25 @@ const App = {
         } catch (err) {
             StatusFeed.error(`Import failed: ${err.message}`);
         }
+    },
+
+    _showImportingMessage(folder) {
+        this._activeFolderId = folder.path; // temporary key until import finishes
+        const gridTitleEl = document.getElementById('grid-title');
+        gridTitleEl.innerHTML = '';
+        gridTitleEl.textContent = folder.name;
+
+        const grid = document.getElementById('thumbnail-grid');
+        grid.innerHTML = '<div id="sync-loading-message"><span>Import in progress...</span></div>';
+
+        // Hide buttons that don't apply
+        document.getElementById('btn-export').style.display = 'none';
+        document.getElementById('unit-toggle').classList.add('hidden');
+
+        // Update active state in sidebar
+        document.querySelectorAll('.folder-item').forEach((item, idx) => {
+            item.classList.toggle('active', this._folders[idx].path === folder.path);
+        });
     },
 
     async _selectFolder(folder) {
@@ -170,14 +223,21 @@ const App = {
                 if (Grid.currentFolderId === folder.id) {
                     Grid._currentFolderManualReviewed = newStatus;
                     Grid.render();
-                    
+
+                    // Show export button when manual_reviewed is on and there are tagged results
+                    const hasTagged = Object.values(Grid._ocrResults).some(r => r.tag);
+                    document.getElementById('btn-export').style.display =
+                        (newStatus && hasTagged) ? '' : 'none';
+
                     // If Viewer is open, we need to refresh its current view too
                     if (Viewer.isOpen) {
                         Viewer._loadCurrent();
                     }
                 }
 
-                updateChipStyle(newStatus); // Update chip style immediately
+                updateChipStyle(newStatus);
+                this.updateTotalWeight();
+                this._renderFolderList(); // Update sidebar badge
                 if (newStatus) {
                     StatusFeed.info(`Folder "${folder.name}" marked as manually reviewed.`);
                 } else {
@@ -192,6 +252,12 @@ const App = {
 
         gridTitleEl.appendChild(manualReviewedChip);
 
+        // Add total gross weight display
+        const totalWeightSpan = document.createElement('span');
+        totalWeightSpan.id = 'total-gross-weight';
+        totalWeightSpan.className = 'total-gross-weight';
+        totalWeightSpan.style.display = 'none';
+        gridTitleEl.appendChild(totalWeightSpan);
 
         // Update active state in sidebar
         document.querySelectorAll('.folder-item').forEach((item, idx) => {
@@ -343,6 +409,38 @@ const App = {
         if (!this._activeFolderId) return;
         // Trigger download by navigating to the export URL
         window.location.href = API.exportOcrUrl(this._activeFolderId);
+    },
+
+    updateTotalWeight() {
+        const el = document.getElementById('total-gross-weight');
+        if (!el) return;
+        const folder = this._folders.find(f => f.id === this._activeFolderId);
+        if (!folder || !folder.manual_reviewed) {
+            el.style.display = 'none';
+            return;
+        }
+        const results = Object.values(Grid._ocrResults);
+        if (results.length === 0) {
+            el.style.display = 'none';
+            return;
+        }
+        let total = 0;
+        let count = 0;
+        results.forEach(r => {
+            if (r.scale_weight != null && r.scale_weight !== '') {
+                const w = parseFloat(r.scale_weight);
+                if (!isNaN(w)) {
+                    total += w;
+                    count++;
+                }
+            }
+        });
+        if (count > 0) {
+            el.textContent = `Total Gross: ${total.toFixed(1)}`;
+            el.style.display = '';
+        } else {
+            el.style.display = 'none';
+        }
     },
 
     async executeActions() {
