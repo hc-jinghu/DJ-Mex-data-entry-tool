@@ -51,6 +51,9 @@ const Grid = {
 
     setMode(mode) {
         if (mode === 'ocr' || mode === 'delete') {
+            // Only data_entry can enter delete/ocr modes
+            if (App.currentRole !== 'data_entry') return;
+
             const currentFolderId = this._currentFolderId;
             if (currentFolderId) {
                 try {
@@ -136,6 +139,7 @@ const Grid = {
     },
 
     async toggleFocusedMark() {
+        if (App.currentRole !== 'data_entry') return;
         if (this._mode === 'normal' || this._currentFolderManualReviewed) return;
 
         const cards = this._gridEl.children;
@@ -291,6 +295,7 @@ const Grid = {
     get isRenaming() { return this._renaming; },
 
     startRename() {
+        if (App.currentRole !== 'data_entry') return;
         if (this._currentFolderManualReviewed) {
             StatusFeed.warn('Cannot rename files: this folder has completed manual review.');
             return;
@@ -390,7 +395,7 @@ const Grid = {
             const hasTagged = results.some(r => r.tag);
             document.getElementById('btn-export').style.display =
                 (this._currentFolderManualReviewed && hasTagged) ? '' : 'none';
-            App.updateTotalWeight();
+            App.updateFolderSummary();
         } catch (err) {
             // OCR results are optional, don't block
         }
@@ -431,16 +436,19 @@ const Grid = {
         document.getElementById('btn-export').style.display = 'none';
 
         this._setSyncing(true);
-        StatusFeed.info('Syncing folder with disk...');
+        const folderEntry = App._folders.find(f => f.id === folderId);
+        const folderLabel = folderEntry ? folderEntry.name : folderId;
+        StatusFeed.info(`Syncing ${folderLabel} with disk...`);
 
         try {
             const folderData = await API.getFolder(folderId); // Fetch folder data including manual_reviewed status
             this._currentFolderManualReviewed = folderData.manual_reviewed;
+            this._updateCullButton();
 
             this._images = (await API.getImages(folderId, 'all')).filter(i => i.status !== 'deleted');
             this._setSyncing(false);
             this.render();
-            StatusFeed.info(`Loaded ${this._images.length} images`);
+            // StatusFeed.info(`Loaded ${this._images.length} images`);
             // Load OCR results after render
             this.loadOcrResults();
         } catch (err) {
@@ -572,7 +580,12 @@ const Grid = {
 
     _updateCullButton() {
         const btn = document.getElementById('btn-cull');
-        btn.disabled = this._selected.size < 2;
+        if (this._currentFolderManualReviewed) {
+            btn.style.display = 'none';
+        } else {
+            btn.style.display = '';
+            btn.disabled = this._selected.size < 2;
+        }
     },
 
     _updateOcrBadges() {

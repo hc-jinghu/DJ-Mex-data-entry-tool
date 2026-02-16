@@ -9,19 +9,14 @@
 <body>
     <div id="app">
         <div id="left-panel" class="panel">
-            <div class="panel-header">Folders</div>
+            <div class="panel-header">Folders <button id="btn-auth" class="btn btn-sm btn-auth" title="Login">Login</button></div>
             <div id="folder-list"></div>
         </div>
         <div id="center-panel" class="panel">
             <div class="panel-header">
                 <span id="grid-title">Select a folder</span>
                 <div id="grid-actions">
-                    <div id="unit-toggle" class="hidden">
-                        <label><input type="radio" name="weight-unit" value="kg" checked> kg</label>
-                        <label><input type="radio" name="weight-unit" value="lbs"> lbs</label>
-                    </div>
-                    <button id="btn-export" class="btn btn-sm" style="display:none">Export .xlsx</button>
-                    <button id="btn-cull" class="btn btn-sm" disabled title="Select 2+ images to cull">Cull Selected</button>
+                    <button id="btn-cull" class="btn btn-sm" disabled title="Select 2+ images to cull"> Start Culling</button>
                     <button id="btn-execute" class="btn btn-sm btn-danger" style="display:none">Execute Deletions</button>
                 </div>
             </div>
@@ -32,6 +27,24 @@
             <div id="thumbnail-grid"></div>
         </div>
         <div id="right-panel" class="panel">
+            <div id="folder-summary" class="hidden">
+                <div class="ocr-detail-header">
+                    <span>Receiving Summary</span>
+                    <div id="folder-summary-actions">
+                        <div id="unit-toggle" class="hidden">
+                            <label><input type="radio" name="weight-unit" value="kg" checked> kg</label>
+                            <label><input type="radio" name="weight-unit" value="lbs"> lbs</label>
+                        </div>
+                        <button id="btn-export" class="btn btn-sm" style="display:none">Export .xlsx</button>
+                    </div>
+                </div>
+                <div id="folder-summary-body">
+                    <div class="ocr-prop"><span class="ocr-prop-label">Pallets</span><span class="ocr-prop-value" id="summary-pallets">0</span></div>
+                    <div class="ocr-prop"><span class="ocr-prop-label">Total Gross</span><span class="ocr-prop-value" id="summary-gross">0</span></div>
+                    <div class="ocr-prop"><span class="ocr-prop-label">Total Tare</span><span class="ocr-prop-value" id="summary-tare">0</span></div>
+                    <div class="ocr-prop"><span class="ocr-prop-label">Total Net</span><span class="ocr-prop-value" id="summary-net">0</span></div>
+                </div>
+            </div>
             <div id="ocr-detail" class="hidden">
                 <div class="ocr-detail-header">
                     <span>Metadata</span>
@@ -39,8 +52,39 @@
                 </div>
                 <div id="ocr-detail-body"></div>
             </div>
-            <div class="panel-header">Activity</div>
-            <div id="status-feed"></div>
+        </div>
+    </div>
+
+    <!-- Fixed activity feed, bottom-right -->
+    <div id="activity-panel">
+        <div class="panel-header">Activity</div>
+        <div id="status-feed"></div>
+    </div>
+
+    <!-- Login overlay -->
+    <div id="login-overlay" class="hidden">
+        <div id="login-box">
+            <h2>Master Photo Library</h2>
+            <div id="login-error" class="hidden"></div>
+            <div class="login-field">
+                <label for="login-role">Role</label>
+                <select id="login-role">
+                    <option value="data_entry">Data Entry</option>
+                    <option value="warehouse">Warehouse</option>
+                </select>
+            </div>
+            <div class="login-field">
+                <label for="login-username">Username</label>
+                <input type="text" id="login-username" autocomplete="username">
+            </div>
+            <div class="login-field">
+                <label for="login-password">Password</label>
+                <input type="password" id="login-password" autocomplete="current-password">
+            </div>
+            <div class="login-buttons">
+                <button id="btn-login" class="btn">Login</button>
+                <button id="btn-viewer" class="btn">Continue as Viewer</button>
+            </div>
         </div>
     </div>
 

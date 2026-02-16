@@ -5,6 +5,7 @@ const App = {
     _folders: [],
     _activeFolderId: null,
     _importingPaths: new Set(),
+    _currentRole: 'viewer',
 
     async init() {
         StatusFeed.init();
@@ -16,6 +17,22 @@ const App = {
 
         ROI.init();
         StatusFeed.info('Master Photo Library starting...');
+
+        // Wire up auth buttons
+        document.getElementById('btn-auth').addEventListener('click', () => this._showLoginOverlay());
+        document.getElementById('btn-login').addEventListener('click', () => this._handleLogin());
+        document.getElementById('btn-viewer').addEventListener('click', () => this._closeLoginOverlay());
+        document.getElementById('login-password').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this._handleLogin();
+        });
+
+        // Check existing session
+        try {
+            const sess = await API.getSession();
+            this._currentRole = sess.role || 'viewer';
+        } catch (_) {
+            this._currentRole = 'viewer';
+        }
 
         // Wire up buttons
         document.getElementById('btn-cull').addEventListener('click', () => this.startCulling());
@@ -34,6 +51,9 @@ const App = {
                 }
             });
         });
+
+        // Apply role restrictions before loading folders
+        this.applyRoleRestrictions();
 
         // Load folders
         await this.loadFolders();
@@ -212,6 +232,11 @@ const App = {
 
         updateChipStyle(folder.manual_reviewed);
 
+        // Hide manual-reviewed chip for non-data_entry roles
+        if (this._currentRole !== 'data_entry') {
+            manualReviewedChip.style.display = 'none';
+        }
+
         manualReviewedChip.addEventListener('click', async (e) => {
             e.stopPropagation(); // Prevent folder click event if any
             const newStatus = !folder.manual_reviewed;
@@ -236,7 +261,7 @@ const App = {
                 }
 
                 updateChipStyle(newStatus);
-                this.updateTotalWeight();
+                this.updateFolderSummary();
                 this._renderFolderList(); // Update sidebar badge
                 if (newStatus) {
                     StatusFeed.info(`Folder "${folder.name}" marked as manually reviewed.`);
@@ -251,13 +276,6 @@ const App = {
         });
 
         gridTitleEl.appendChild(manualReviewedChip);
-
-        // Add total gross weight display
-        const totalWeightSpan = document.createElement('span');
-        totalWeightSpan.id = 'total-gross-weight';
-        totalWeightSpan.className = 'total-gross-weight';
-        totalWeightSpan.style.display = 'none';
-        gridTitleEl.appendChild(totalWeightSpan);
 
         // Update active state in sidebar
         document.querySelectorAll('.folder-item').forEach((item, idx) => {
@@ -411,36 +429,42 @@ const App = {
         window.location.href = API.exportOcrUrl(this._activeFolderId);
     },
 
-    updateTotalWeight() {
-        const el = document.getElementById('total-gross-weight');
-        if (!el) return;
+    updateFolderSummary() {
+        const panel = document.getElementById('folder-summary');
+        if (!panel) return;
         const folder = this._folders.find(f => f.id === this._activeFolderId);
         if (!folder || !folder.manual_reviewed) {
-            el.style.display = 'none';
+            panel.classList.add('hidden');
             return;
         }
         const results = Object.values(Grid._ocrResults);
         if (results.length === 0) {
-            el.style.display = 'none';
+            panel.classList.add('hidden');
             return;
         }
-        let total = 0;
-        let count = 0;
+
+        let pallets = 0;
+        let totalGross = 0;
+        let totalTare = 0;
+        const tagPattern = /^[A-Za-z]{3}\d{3}$/;
+
         results.forEach(r => {
+            if (r.tag && tagPattern.test(r.tag)) pallets++;
             if (r.scale_weight != null && r.scale_weight !== '') {
                 const w = parseFloat(r.scale_weight);
-                if (!isNaN(w)) {
-                    total += w;
-                    count++;
-                }
+                if (!isNaN(w)) totalGross += w;
+            }
+            if (r.tare_weight != null && r.tare_weight !== '') {
+                const w = parseFloat(r.tare_weight);
+                if (!isNaN(w)) totalTare += w;
             }
         });
-        if (count > 0) {
-            el.textContent = `Total Gross: ${total.toFixed(1)}`;
-            el.style.display = '';
-        } else {
-            el.style.display = 'none';
-        }
+
+        document.getElementById('summary-pallets').textContent = pallets;
+        document.getElementById('summary-gross').textContent = totalGross.toFixed(2);
+        document.getElementById('summary-tare').textContent = totalTare.toFixed(2);
+        document.getElementById('summary-net').textContent = (totalGross - totalTare).toFixed(2);
+        panel.classList.remove('hidden');
     },
 
     async executeActions() {
@@ -475,6 +499,82 @@ const App = {
             await this.loadFolders(false);
         } catch (err) {
             StatusFeed.error(`Execution failed: ${err.message}`);
+        }
+    },
+
+    // ── Auth & Role Management ──────────────────────────────────
+
+    get currentRole() { return this._currentRole; },
+
+    _showLoginOverlay() {
+        document.getElementById('login-overlay').classList.remove('hidden');
+        document.getElementById('login-error').classList.add('hidden');
+        document.getElementById('login-username').value = '';
+        document.getElementById('login-password').value = '';
+        document.getElementById('login-username').focus();
+    },
+
+    _closeLoginOverlay() {
+        document.getElementById('login-overlay').classList.add('hidden');
+    },
+
+    async _handleLogin() {
+        const role = document.getElementById('login-role').value;
+        const username = document.getElementById('login-username').value;
+        const password = document.getElementById('login-password').value;
+        const errorEl = document.getElementById('login-error');
+
+        try {
+            await API.login(role, username, password);
+            this._currentRole = role;
+            this._closeLoginOverlay();
+            this.applyRoleRestrictions();
+            // Reload folders (viewer filter may change)
+            this._activeFolderId = null;
+            await this.loadFolders();
+            StatusFeed.success(`Logged in as ${role}`);
+        } catch (err) {
+            errorEl.textContent = err.message;
+            errorEl.classList.remove('hidden');
+        }
+    },
+
+    async handleLogout() {
+        try {
+            await API.logout();
+        } catch (_) { /* ignore */ }
+        this._currentRole = 'viewer';
+        this.applyRoleRestrictions();
+        this._activeFolderId = null;
+        await this.loadFolders();
+        StatusFeed.info('Logged out');
+    },
+
+    applyRoleRestrictions() {
+        const role = this._currentRole;
+        const authBtn = document.getElementById('btn-auth');
+
+        // Update auth button text
+        if (role === 'viewer') {
+            authBtn.textContent = 'Login';
+            authBtn.onclick = () => this._showLoginOverlay();
+        } else {
+            authBtn.textContent = `${role} (Logout)`;
+            authBtn.onclick = () => this.handleLogout();
+        }
+
+        // Right panel (activity feed): hidden for viewer
+        const rightPanel = document.getElementById('right-panel');
+        rightPanel.style.display = role === 'viewer' ? 'none' : '';
+
+        // Grid actions bar: hidden for viewer
+        const gridActions = document.getElementById('grid-actions');
+        gridActions.style.display = role === 'viewer' ? 'none' : '';
+
+        // Unit toggle: hidden for viewer and warehouse
+        const unitToggle = document.getElementById('unit-toggle');
+        if (role === 'viewer' || role === 'warehouse') {
+            unitToggle.classList.add('hidden');
         }
     },
 };

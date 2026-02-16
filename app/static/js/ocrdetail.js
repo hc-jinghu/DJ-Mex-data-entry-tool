@@ -86,6 +86,10 @@ const OcrDetail = {
         const swVal = ocr.scale_weight != null ? ocr.scale_weight : null;
         html += this._prop('scale_weight', swVal != null ? swVal : '-', '');
 
+        // Tare weight
+        const twVal = ocr.tare_weight != null ? ocr.tare_weight : null;
+        html += this._prop('tare_weight', twVal != null ? twVal : '-', '');
+
         // Processed at
         if (ocr.processed_at) {
             html += '<hr class="ocr-detail-divider">';

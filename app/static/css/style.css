@@ -416,7 +416,21 @@ body {
     margin: 4px 0;
 }
 
-/* ── Right Panel: Status Feed ─────────────────────────────── */
+/* ── Activity Panel (fixed bottom-right) ─────────────────── */
+#activity-panel {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    width: 280px;
+    height: 50vh;
+    background: var(--bg-primary);
+    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+}
+
 #status-feed {
     flex: 1;
     overflow-y: auto;
@@ -994,6 +1008,107 @@ body {
     animation: sync-pulse 1.2s ease-in-out infinite;
 }
 
+/* ── Login Overlay ───────────────────────────────────────── */
+#login-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#login-overlay.hidden { display: none; }
+
+#login-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 32px;
+    width: 340px;
+    max-width: 90vw;
+}
+
+#login-box h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    text-align: center;
+    color: var(--text-primary);
+}
+
+#login-error {
+    background: rgba(231, 76, 60, 0.2);
+    color: var(--danger);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+
+#login-error.hidden { display: none; }
+
+.login-field {
+    margin-bottom: 12px;
+}
+
+.login-field label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.login-field input,
+.login-field select {
+    width: 100%;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+}
+
+.login-field input:focus,
+.login-field select:focus {
+    border-color: var(--accent);
+}
+
+.login-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.login-buttons .btn {
+    flex: 1;
+    padding: 8px 12px;
+    font-size: 12px;
+    text-align: center;
+}
+
+#btn-login {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+#btn-login:hover {
+    background: var(--accent-dim);
+}
+
+.btn-auth {
+    font-size: 10px !important;
+    padding: 2px 6px !important;
+    margin-left: auto;
+}
+
 /* Manual Reviewed Chip in Grid Title */
 .manual-reviewed-chip {
     display: inline-flex;
@@ -1016,15 +1131,22 @@ body {
     background: var(--danger); /* Red background when unchecked */
 }
 
-.total-gross-weight {
-    display: inline-flex;
+/* ── Folder Summary Panel ────────────────────────────────── */
+#folder-summary {
+    border-bottom: 1px solid var(--border);
+}
+
+#folder-summary.hidden { display: none; }
+
+#folder-summary-actions {
+    display: flex;
     align-items: center;
-    padding: 4px 8px;
-    border-radius: 4px;
-    margin-left: 8px;
-    color: #fff;
-    background: #555;
-    font-size: 14px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    user-select: none;
+    gap: 6px;
+}
+
+#folder-summary-body {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    line-height: 1.7;
 }

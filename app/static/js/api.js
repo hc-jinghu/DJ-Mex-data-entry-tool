@@ -171,4 +171,20 @@ const API = {
             body: JSON.stringify(data),
         });
     },
+
+    // Auth
+    login(role, username, password) {
+        return this._fetch('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ role, username, password }),
+        });
+    },
+
+    logout() {
+        return this._fetch('/api/auth/logout', { method: 'POST' });
+    },
+
+    getSession() {
+        return this._fetch('/api/auth/session');
+    },
 };

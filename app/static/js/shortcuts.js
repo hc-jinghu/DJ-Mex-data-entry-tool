@@ -70,6 +70,7 @@ const Shortcuts = {
 
             case 'Enter':
                 e.preventDefault();
+                if (App.currentRole !== 'data_entry') break;
                 if (mode === 'delete') {
                     App.executeActions();
                 } else if (mode === 'ocr') {
@@ -87,6 +88,7 @@ const Shortcuts = {
             case 'x':
             case 'X':
             case 'Delete':
+                if (App.currentRole !== 'data_entry') break;
                 if (mode === 'ocr') break; // can't delete-mark while in OCR mode
                 e.preventDefault();
                 if (mode !== 'delete') {
@@ -97,6 +99,7 @@ const Shortcuts = {
 
             case 'o':
             case 'O':
+                if (App.currentRole !== 'data_entry') break;
                 if (mode === 'delete') break; // can't OCR-mark while in delete mode
                 e.preventDefault();
                 if (mode !== 'ocr') {
@@ -107,6 +110,7 @@ const Shortcuts = {
 
             case 'c':
             case 'C':
+                if (App.currentRole !== 'data_entry') break;
                 if (mode !== 'normal') break; // can't cull while in a mark mode
                 if (!e.metaKey && !e.ctrlKey) {
                     e.preventDefault();
@@ -157,11 +161,13 @@ const Shortcuts = {
             case 'x':
             case 'X':
             case 'Delete':
+                if (App.currentRole !== 'data_entry') break;
                 e.preventDefault();
                 Viewer.markCurrentForDeletion();
                 break;
             case 'r':
             case 'R':
+                if (App.currentRole !== 'data_entry') break;
                 e.preventDefault();
                 Viewer.rotateCurrent();
                 break;

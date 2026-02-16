@@ -83,7 +83,7 @@ const Viewer = {
         this._isOpen = true;
         this._overlay.classList.remove('hidden');
         this._loadCurrent();
-        StatusFeed.info(`Viewer opened: ${images[startIndex].filename}`);
+        // StatusFeed.info(`Viewer opened: ${images[startIndex].filename}`);
     },
 
     close() {
@@ -169,6 +169,10 @@ const Viewer = {
         // Sync grid selection to current viewer image
         this._syncGridFocus(img.id);
 
+        // Hide rotate button for non-data_entry
+        document.getElementById('viewer-rotate-btn').style.display =
+            App.currentRole === 'data_entry' ? '' : 'none';
+
         // Update side panel
         this._loadOcrPanel(img.id);
         this._loadCropImage(API.tagRoiUrl(img.id), this._tagRoiImg, this._tagRoiEmpty);
@@ -205,6 +209,7 @@ const Viewer = {
 
         this._ocrDetailEl.innerHTML = '';
         const isReadonly = Grid._currentFolderManualReviewed;
+        const role = App.currentRole;
         const isPending = ocr.status === 'pending';
 
         // Show original filename if different from current
@@ -218,22 +223,31 @@ const Viewer = {
             }
         }
 
-        // Skip tag/item/scale_weight if image hasn't been OCR'd yet
+        // Skip tag/item/scale_weight/tare_weight if image hasn't been OCR'd yet
         if (isPending) return;
 
-        // Tag — editable
+        // For warehouse: tag, item, scale_weight are always read-only
+        const mainFieldsReadonly = isReadonly || role === 'warehouse' || role === 'viewer';
+
+        // Tag — editable (data_entry only)
         this._ocrDetailEl.appendChild(
-            this._editableRow('tag', ocr.tag || '', imageId, isReadonly)
+            this._editableRow('tag', ocr.tag || '', imageId, mainFieldsReadonly)
         );
 
-        // Item — searchable dropdown
+        // Item — searchable dropdown (data_entry only)
         this._ocrDetailEl.appendChild(
-            this._itemDropdownRow('item', ocr.item || '', imageId, isReadonly)
+            this._itemDropdownRow('item', ocr.item || '', imageId, mainFieldsReadonly)
         );
 
-        // Scale weight — editable
+        // Scale weight — editable (data_entry only)
         this._ocrDetailEl.appendChild(
-            this._editableRow('scale_weight', ocr.scale_weight != null ? String(ocr.scale_weight) : '', imageId, isReadonly)
+            this._editableRow('scale_weight', ocr.scale_weight != null ? String(ocr.scale_weight) : '', imageId, mainFieldsReadonly)
+        );
+
+        // Tare weight — editable for data_entry and warehouse
+        const tareReadonly = isReadonly || role === 'viewer';
+        this._ocrDetailEl.appendChild(
+            this._editableRow('tare_weight', ocr.tare_weight != null ? String(ocr.tare_weight) : '', imageId, tareReadonly)
         );
     },
 
@@ -426,7 +440,7 @@ const Viewer = {
                 value = newVal;
 
                 const payload = {};
-                if (field === 'scale_weight') {
+                if (field === 'scale_weight' || field === 'tare_weight') {
                     payload[field] = newVal ? parseFloat(newVal) : null;
                 } else {
                     payload[field] = newVal || null;
@@ -599,6 +613,7 @@ const Viewer = {
     // ── Rename ──────────────────────────────────────────────────
 
     startRename() {
+        if (App.currentRole !== 'data_entry') return;
         if (Grid._currentFolderManualReviewed) {
             StatusFeed.warn('Cannot rename files: this folder has completed manual review.');
             return;
@@ -659,6 +674,7 @@ const Viewer = {
     // ── Rotate ──────────────────────────────────────────────────
 
     async rotateCurrent() {
+        if (App.currentRole !== 'data_entry') return;
         if (this._rotating) return;
         const img = this._images[this._currentIndex];
         if (!img) return;
@@ -703,6 +719,7 @@ const Viewer = {
     // ── Mark ────────────────────────────────────────────────────
 
     async markCurrentForDeletion() {
+        if (App.currentRole !== 'data_entry') return;
         if (Grid._currentFolderManualReviewed) {
             StatusFeed.warn('Cannot mark for deletion: this folder has completed manual review.');
             return;

@@ -18,6 +18,9 @@ const StatusFeed = {
         entry.className = 'feed-entry' + (type ? ` feed-${type}` : '');
         entry.innerHTML = `<span class="feed-time">${this._timestamp()}</span>${message}`;
         this._el.appendChild(entry);
+        while (this._el.children.length > 200) {
+            this._el.removeChild(this._el.firstChild);
+        }
         this._el.scrollTop = this._el.scrollHeight;
     },
 

@@ -1,12 +1,17 @@
 """Flask app, route registration, and static serving."""
 
 import atexit
+import functools
 import json
 import os
 import sys
 
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask import Flask, g, jsonify, request, send_file, send_from_directory, session
 
+from .auth import (
+    validate_credentials, get_active_sessions, set_active_session,
+    clear_active_session, check_session_conflict, get_or_create_secret_key,
+)
 from .database import get_connection, init_db, row_to_dict, rows_to_dicts
 from .importer import import_folder as do_import, IMAGE_EXTENSIONS
 
@@ -76,16 +81,92 @@ def create_app():
         static_url_path='/static',
     )
 
+    app.secret_key = get_or_create_secret_key()
+
     init_db()
     _clear_all_marks()  # Clear stale marks from previous session
     _migrate_thumbnail_dirs()  # Move name-based thumb dirs to ID-based
     atexit.register(_clear_all_marks)
+
+    # ── Auth middleware ──────────────────────────────────────────────
+
+    @app.before_request
+    def _set_user_role():
+        """Set g.user_role from session cookie + IP validation."""
+        role = session.get('role')
+        ip = request.remote_addr
+        if role and role in ('data_entry', 'warehouse'):
+            # Validate the session IP still matches
+            sessions = get_active_sessions()
+            active = sessions.get(role)
+            if active and active['ip'] == ip:
+                g.user_role = role
+                g.username = session.get('username', '')
+            else:
+                # Session invalid (IP mismatch or cleared)
+                session.clear()
+                g.user_role = 'viewer'
+                g.username = ''
+        else:
+            g.user_role = 'viewer'
+            g.username = ''
+
+    def require_role(*roles):
+        """Decorator to restrict endpoint to specific roles."""
+        def decorator(f):
+            @functools.wraps(f)
+            def wrapper(*args, **kwargs):
+                if g.user_role not in roles:
+                    return jsonify({'error': 'forbidden'}), 403
+                return f(*args, **kwargs)
+            return wrapper
+        return decorator
 
     # ── Static serving ──────────────────────────────────────────────
 
     @app.route('/')
     def index():
         return send_from_directory(app.static_folder, 'index.html')
+
+    # ── Auth endpoints ──────────────────────────────────────────────
+
+    @app.route('/api/auth/login', methods=['POST'])
+    def auth_login():
+        data = request.get_json()
+        role = data.get('role')
+        username = data.get('username', '')
+        password = data.get('password', '')
+
+        if role not in ('data_entry', 'warehouse'):
+            return jsonify({'error': 'invalid role'}), 400
+
+        if not validate_credentials(role, username, password):
+            return jsonify({'error': 'invalid credentials'}), 401
+
+        ip = request.remote_addr
+        if check_session_conflict(role, ip):
+            return jsonify({'error': f'{role} role is already in use from another device'}), 409
+
+        set_active_session(role, ip, username)
+        session['role'] = role
+        session['username'] = username
+        return jsonify({'role': role, 'username': username, 'authenticated': True})
+
+    @app.route('/api/auth/logout', methods=['POST'])
+    def auth_logout():
+        role = session.get('role')
+        if role:
+            clear_active_session(role)
+        session.clear()
+        return jsonify({'success': True})
+
+    @app.route('/api/auth/session', methods=['GET'])
+    def auth_session():
+        return jsonify({
+            'role': g.user_role,
+            'username': getattr(g, 'username', ''),
+            'authenticated': g.user_role != 'viewer',
+        })
 
     @app.route('/api/item_codes', methods=['GET'])
     def get_item_codes():
@@ -195,11 +276,17 @@ def create_app():
                 })
 
         conn.close()
+
+        # Viewer role: only sees manually reviewed, imported folders
+        if g.user_role == 'viewer':
+            all_folders = [f for f in all_folders if f.get('imported') and f.get('manual_reviewed')]
+
         print(f"DEBUG: list_folders - Final all_folders to return: {all_folders}")
         sys.stdout.flush()
         return jsonify(all_folders)
 
     @app.route('/api/folders/import', methods=['POST'])
+    @require_role('data_entry')
     def import_folder():
         """Import a folder: scan, insert to DB, generate thumbnails."""
         from .importer import import_folder as do_import
@@ -236,6 +323,7 @@ def create_app():
         return jsonify(folder)
 
     @app.route('/api/folders/<int:folder_id>/manual-reviewed', methods=['PUT'])
+    @require_role('data_entry')
     def update_manual_reviewed(folder_id):
         data = request.get_json()
         manual_reviewed = data.get('manual_reviewed')
@@ -327,6 +415,7 @@ def create_app():
         return send_file(full_path)
 
     @app.route('/api/images/<int:image_id>/rotate', methods=['POST'])
+    @require_role('data_entry')
     def rotate_image(image_id):
         """Rotate an image 90 degrees clockwise on disk (full image + thumbnail)."""
         from PIL import Image as PILImage
@@ -378,6 +467,7 @@ def create_app():
             return jsonify({'error': str(e)}), 500
 
     @app.route('/api/images/<int:image_id>/rename', methods=['PUT'])
+    @require_role('data_entry')
     def rename_image(image_id):
         data = request.get_json()
         new_name = data.get('filename')
@@ -411,6 +501,7 @@ def create_app():
         return jsonify({'success': True, 'filepath': new_filepath})
 
     @app.route('/api/images/<int:image_id>/status', methods=['PUT'])
+    @require_role('data_entry')
     def update_image_status(image_id):
         from .actions import sync_actions_file
 
@@ -431,6 +522,7 @@ def create_app():
         return jsonify({'success': True})
 
     @app.route('/api/images/bulk-status', methods=['POST'])
+    @require_role('data_entry')
     def bulk_update_status():
         from .actions import sync_actions_file
 
@@ -463,6 +555,7 @@ def create_app():
         return jsonify(actions)
 
     @app.route('/api/actions/execute', methods=['POST'])
+    @require_role('data_entry')
     def execute_actions():
         from .actions import execute_pending_actions
         result = execute_pending_actions(LIBRARY_ROOT)
@@ -471,6 +564,7 @@ def create_app():
     # ── Culling endpoints ───────────────────────────────────────────
 
     @app.route('/api/culling/start', methods=['POST'])
+    @require_role('data_entry')
     def start_culling():
         data = request.get_json()
         image_ids = data.get('image_ids', [])
@@ -508,6 +602,7 @@ def create_app():
         return jsonify(session)
 
     @app.route('/api/culling/<int:session_id>/pick', methods=['PUT'])
+    @require_role('data_entry')
     def pick_culling_image(session_id):
         data = request.get_json()
         picked_id = data.get('image_id')
@@ -536,6 +631,7 @@ def create_app():
     # ── Folder unit endpoint ────────────────────────────────────────
 
     @app.route('/api/folders/<int:folder_id>/unit', methods=['PUT'])
+    @require_role('data_entry')
     def set_folder_unit(folder_id):
         data = request.get_json()
         weight_unit = data.get('weight_unit')
@@ -556,6 +652,7 @@ def create_app():
     # ── Folder ROI endpoint ────────────────────────────────────────────
 
     @app.route('/api/folders/<int:folder_id>/roi', methods=['PUT'])
+    @require_role('data_entry')
     def set_folder_roi(folder_id):
         data = request.get_json()
         cells = data.get('cells')
@@ -577,6 +674,7 @@ def create_app():
     # ── OCR endpoints ────────────────────────────────────────────────
 
     @app.route('/api/ocr/process/<int:image_id>', methods=['POST'])
+    @require_role('data_entry')
     def process_ocr_image(image_id):
         """Process a single image for OCR and return the result immediately."""
         from .ocr import process_image, save_ocr_result
@@ -625,6 +723,7 @@ def create_app():
             return jsonify({'error': str(e)}), 500
 
     @app.route('/api/ocr/submit', methods=['POST'])
+    @require_role('data_entry')
     def submit_ocr():
         """Submit images for OCR processing.
 
@@ -723,14 +822,20 @@ def create_app():
         return send_file(led_path, mimetype='image/jpeg')
 
     @app.route('/api/ocr/result/<int:image_id>', methods=['PUT'])
+    @require_role('data_entry', 'warehouse')
     def update_ocr_result(image_id):
         """Manually update OCR result (for human review corrections)."""
         data = request.get_json()
         conn = get_connection()
 
+        # Warehouse can only edit tare_weight
+        allowed_keys = ('tag', 'scale_weight', 'handwritten_weight', 'status', 'item', 'tare_weight')
+        if g.user_role == 'warehouse':
+            allowed_keys = ('tare_weight',)
+
         fields = []
         values = []
-        for key in ('tag', 'scale_weight', 'handwritten_weight', 'status', 'item'):
+        for key in allowed_keys:
             if key in data:
                 fields.append(f"{key} = ?")
                 values.append(data[key])
@@ -774,7 +879,7 @@ def create_app():
         tag_pattern = re.compile(r'^[A-Za-z]{3}\d{3}$')
 
         all_rows = rows_to_dicts(conn.execute(
-            """SELECT o.tag, o.scale_weight, o.item
+            """SELECT o.tag, o.scale_weight, o.item, o.tare_weight
                FROM ocr_results o
                JOIN images i ON o.image_id = i.id
                WHERE i.folder_id = ?
@@ -827,7 +932,9 @@ def create_app():
             # C: Gross
             if r['scale_weight'] is not None:
                 ws.cell(row=i, column=3, value=r['scale_weight'])
-            # D: Tare (blank)
+            # D: Tare (from DB if available)
+            if r.get('tare_weight') is not None:
+                ws.cell(row=i, column=4, value=r['tare_weight'])
             # E: Net = Gross - Tare (formula)
             ws.cell(row=i, column=5, value=f'=C{i}-D{i}')
             # F: Description (blank)
@@ -845,6 +952,7 @@ def create_app():
         )
 
     @app.route('/api/culling/<int:session_id>/finalize', methods=['POST'])
+    @require_role('data_entry')
     def finalize_culling(session_id):
         from .actions import sync_actions_file
 
