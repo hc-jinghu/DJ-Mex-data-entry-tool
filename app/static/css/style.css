@@ -1247,10 +1247,24 @@ body {
 /* ── Left Panel Footer (gear icon) ───────────────────────── */
 #left-panel-footer {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     padding: 6px 10px;
     border-top: 1px solid var(--border);
     background: var(--bg-secondary);
+}
+
+.btn-collapse-all {
+    font-size: 20px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.btn-collapse-all:hover {
+    color: var(--text-primary);
 }
 
 .btn-settings {

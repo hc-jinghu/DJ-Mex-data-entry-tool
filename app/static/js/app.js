@@ -37,6 +37,8 @@ const App = {
             this._currentRole = 'viewer';
         }
 
+        document.getElementById('btn-collapse-all').addEventListener('click', () => this.collapseAll());
+
         // Wire up buttons
         document.getElementById('btn-cull').addEventListener('click', () => this.startCulling());
         document.getElementById('btn-execute').addEventListener('click', () => this.executeActions());
@@ -69,12 +71,6 @@ const App = {
             const data = await API.getFolders();
             this._folders = data.folders || data;
             this._groups = data.groups || [];
-
-            // Expand all groups by default on first load
-            if (this._expandedGroups.size === 0 && this._groups.length > 0) {
-                this._groups.forEach(g => this._expandedGroups.add(g.name));
-            }
-
             this._renderFolderList();
 
             // Only auto-select if no folder is currently active
@@ -93,6 +89,11 @@ const App = {
         } catch (err) {
             StatusFeed.error(`Failed to load folders: ${err.message}`);
         }
+    },
+
+    collapseAll() {
+        this._expandedGroups.clear();
+        this._renderFolderList();
     },
 
     async _backgroundImport(folders) {
@@ -129,6 +130,35 @@ const App = {
     /** macOS stores "/" in filenames as ":" on disk; reverse it for display. */
     _displayName(name) {
         return name ? name.replaceAll(':', '/') : name;
+    },
+
+    /**
+     * Parse a folder name as a date for sorting.
+     * Handles "M D", "M:D", "M D YY", "M D YYYY" (macOS stores "/" as ":").
+     * Returns a timestamp, or null if not parseable as a date.
+     */
+    _parseFolderDate(name) {
+        if (!name) return null;
+        const parts = name.replace(/[:\/]/g, ' ').trim().split(/\s+/).map(Number);
+        if (parts.length < 2 || parts.some(isNaN)) return null;
+        const [month, day] = parts;
+        if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+        const year = parts[2]
+            ? (parts[2] < 100 ? 2000 + parts[2] : parts[2])
+            : new Date().getFullYear();
+        return new Date(year, month - 1, day).getTime();
+    },
+
+    /** Sort an array of objects by folder name parsed as date, fallback to locale string sort. */
+    _sortByDate(items, nameKey = 'name') {
+        return [...items].sort((a, b) => {
+            const da = this._parseFolderDate(a[nameKey]);
+            const db = this._parseFolderDate(b[nameKey]);
+            if (da !== null && db !== null) return da - db;
+            if (da !== null) return -1;
+            if (db !== null) return 1;
+            return (a[nameKey] || '').localeCompare(b[nameKey] || '');
+        });
     },
 
     _renderFolderItem(folder) {
@@ -179,7 +209,7 @@ const App = {
         list.innerHTML = '';
 
         // Separate flat folders from grouped ones
-        const flatFolders = this._folders.filter(f => !f.parent);
+        const flatFolders = this._sortByDate(this._folders.filter(f => !f.parent));
         const groupedByParent = {};
         this._folders.forEach(f => {
             if (f.parent) {
@@ -193,9 +223,9 @@ const App = {
             list.appendChild(this._renderFolderItem(folder));
         });
 
-        // Render groups
-        this._groups.forEach(group => {
-            const children = groupedByParent[group.name] || [];
+        // Render groups (sorted by date)
+        this._sortByDate(this._groups).forEach(group => {
+            const children = this._sortByDate(groupedByParent[group.name] || []);
             if (children.length === 0) return;
 
             const isExpanded = this._expandedGroups.has(group.name);

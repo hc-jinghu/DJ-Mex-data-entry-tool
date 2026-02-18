@@ -44,9 +44,18 @@ const Settings = {
     },
 
     open() {
+        const isDataEntry = App._currentRole === 'data_entry';
+        const pathNavItem = document.querySelector('.settings-nav-item[data-section="library-path"]');
+        pathNavItem.style.display = isDataEntry ? '' : 'none';
+
+        // If Library Path tab was active but user lost access, reset to Item Codes
+        if (!isDataEntry) {
+            this._switchSection('item-codes');
+        }
+
         document.getElementById('settings-overlay').classList.remove('hidden');
         this._loadItemCodes();
-        this._loadLibraryPath();
+        if (isDataEntry) this._loadLibraryPath();
         document.getElementById('settings-code-input').focus();
     },
 
