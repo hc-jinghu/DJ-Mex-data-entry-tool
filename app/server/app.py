@@ -370,10 +370,11 @@ def create_app():
 
             if match:
                 matched_ids.add(match['id'])
-                # Ensure manual_reviewed is present, default to False if not in DB (old records)
                 match_dict = {**match, 'imported': True, 'parent': parent}
                 if 'manual_reviewed' not in match_dict:
                     match_dict['manual_reviewed'] = False
+                if 'warehouse_verified' not in match_dict:
+                    match_dict['warehouse_verified'] = False
                 all_folders.append(match_dict)
             else:
                 all_folders.append({
@@ -383,6 +384,7 @@ def create_app():
                     'image_count': len(image_files),
                     'imported': False,
                     'manual_reviewed': False,
+                    'warehouse_verified': False,
                     'parent': parent,
                 })
 
@@ -428,9 +430,10 @@ def create_app():
         conn.close()
         if not folder:
             return jsonify({'error': 'not found'}), 404
-        # Ensure manual_reviewed is present, default to False if not in DB (old records)
         if 'manual_reviewed' not in folder:
             folder['manual_reviewed'] = False
+        if 'warehouse_verified' not in folder:
+            folder['warehouse_verified'] = False
         return jsonify(folder)
 
     @app.route('/api/folders/<int:folder_id>/manual-reviewed', methods=['PUT'])
@@ -445,6 +448,23 @@ def create_app():
         conn.execute(
             "UPDATE folders SET manual_reviewed = ? WHERE id = ?",
             (manual_reviewed, folder_id)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+
+    @app.route('/api/folders/<int:folder_id>/warehouse-verified', methods=['PUT'])
+    @require_role('warehouse')
+    def update_warehouse_verified(folder_id):
+        data = request.get_json()
+        warehouse_verified = data.get('warehouse_verified')
+        if warehouse_verified is None or not isinstance(warehouse_verified, bool):
+            return jsonify({'error': 'warehouse_verified (boolean) is required'}), 400
+
+        conn = get_connection()
+        conn.execute(
+            "UPDATE folders SET warehouse_verified = ? WHERE id = ?",
+            (warehouse_verified, folder_id)
         )
         conn.commit()
         conn.close()
@@ -1082,8 +1102,9 @@ def create_app():
             # D: Tare (from DB if available)
             if r.get('tare_weight') is not None:
                 ws.cell(row=i, column=4, value=r['tare_weight'])
-            # E: Net = Gross - Tare (formula)
-            ws.cell(row=i, column=5, value=f'=C{i}-D{i}')
+            # E: Net = Gross - Tare (formula, 2 decimal places)
+            net_cell = ws.cell(row=i, column=5, value=f'=C{i}-D{i}')
+            net_cell.number_format = '0.00'
             # F: Description (blank)
 
         buf = io.BytesIO()

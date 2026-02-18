@@ -90,6 +90,12 @@ def init_db():
         pass  # Column already exists
 
     try:
+        conn.execute("ALTER TABLE folders ADD COLUMN warehouse_verified BOOLEAN DEFAULT FALSE")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
         conn.execute("ALTER TABLE ocr_results ADD COLUMN item TEXT")
         conn.commit()
     except sqlite3.OperationalError:

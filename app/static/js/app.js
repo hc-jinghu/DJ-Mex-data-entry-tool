@@ -416,6 +416,43 @@ const App = {
 
         gridTitleEl.appendChild(manualReviewedChip);
 
+        // Add warehouse verified chip (warehouse role only)
+        const warehouseChip = document.createElement('span');
+        warehouseChip.className = 'warehouse-verified-chip';
+        warehouseChip.title = 'Toggle warehouse verification for this folder';
+
+        const updateWarehouseChipStyle = (isChecked) => {
+            warehouseChip.classList.toggle('checked', isChecked);
+            warehouseChip.classList.toggle('unchecked', !isChecked);
+            warehouseChip.textContent = isChecked ? 'Warehouse Verified' : 'awaiting warehouse';
+        };
+
+        updateWarehouseChipStyle(folder.warehouse_verified);
+
+        if (this._currentRole !== 'warehouse') {
+            warehouseChip.style.display = 'none';
+        }
+
+        warehouseChip.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const newStatus = !folder.warehouse_verified;
+            try {
+                await API.updateFolderWarehouseVerified(folder.id, newStatus);
+                folder.warehouse_verified = newStatus;
+                updateWarehouseChipStyle(newStatus);
+                this._renderFolderList();
+                StatusFeed.info(newStatus
+                    ? `Folder "${folder.name}" marked as warehouse verified.`
+                    : `Folder "${folder.name}" unmarked as warehouse verified.`
+                );
+            } catch (err) {
+                StatusFeed.error(`Failed to update warehouse status: ${err.message}`);
+                updateWarehouseChipStyle(folder.warehouse_verified);
+            }
+        });
+
+        gridTitleEl.appendChild(warehouseChip);
+
         // Re-render sidebar to update active state
         this._renderFolderList();
 
