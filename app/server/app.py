@@ -1098,10 +1098,12 @@ def create_app():
             ws.cell(row=i, column=2, value=r['tag'])
             # C: Gross
             if r['scale_weight'] is not None:
-                ws.cell(row=i, column=3, value=r['scale_weight'])
+                gross_cell = ws.cell(row=i, column=3, value=r['scale_weight'])
+                gross_cell.number_format = '0.00'
             # D: Tare (from DB if available)
             if r.get('tare_weight') is not None:
-                ws.cell(row=i, column=4, value=r['tare_weight'])
+                tare_cell = ws.cell(row=i, column=4, value=r['tare_weight'])
+                tare_cell.number_format = '0.00'
             # E: Net = Gross - Tare (formula, 2 decimal places)
             net_cell = ws.cell(row=i, column=5, value=f'=C{i}-D{i}')
             net_cell.number_format = '0.00'
