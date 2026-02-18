@@ -134,6 +134,10 @@ const API = {
     },
 
     // OCR
+    vlmStatus() {
+        return this._fetch('/api/ocr/vlm-status');
+    },
+
     processOcrImage(imageId) {
         return this._fetch(`/api/ocr/process/${imageId}`, { method: 'POST' });
     },
@@ -169,6 +173,18 @@ const API = {
         return this._fetch(`/api/ocr/result/${imageId}`, {
             method: 'PUT',
             body: JSON.stringify(data),
+        });
+    },
+
+    // Item Codes
+    getItemCodes() {
+        return this._fetch('/api/item_codes');
+    },
+
+    addItemCode(code, description) {
+        return this._fetch('/api/item_codes', {
+            method: 'POST',
+            body: JSON.stringify({ code, description }),
         });
     },
 

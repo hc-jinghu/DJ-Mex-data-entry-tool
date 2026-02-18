@@ -3,6 +3,8 @@
  */
 const App = {
     _folders: [],
+    _groups: [],
+    _expandedGroups: new Set(),
     _activeFolderId: null,
     _importingPaths: new Set(),
     _currentRole: 'viewer',
@@ -16,6 +18,7 @@ const App = {
         Shortcuts.init();
 
         ROI.init();
+        Settings.init();
         StatusFeed.info('Master Photo Library starting...');
 
         // Wire up auth buttons
@@ -63,7 +66,15 @@ const App = {
 
     async loadFolders(autoSelect = true) {
         try {
-            this._folders = await API.getFolders();
+            const data = await API.getFolders();
+            this._folders = data.folders || data;
+            this._groups = data.groups || [];
+
+            // Expand all groups by default on first load
+            if (this._expandedGroups.size === 0 && this._groups.length > 0) {
+                this._groups.forEach(g => this._expandedGroups.add(g.name));
+            }
+
             this._renderFolderList();
 
             // Only auto-select if no folder is currently active
@@ -115,51 +126,151 @@ const App = {
         }
     },
 
+    /** macOS stores "/" in filenames as ":" on disk; reverse it for display. */
+    _displayName(name) {
+        return name ? name.replaceAll(':', '/') : name;
+    },
+
+    _renderFolderItem(folder) {
+        const item = document.createElement('div');
+        item.className = 'folder-item';
+        if ((folder.id && folder.id === this._activeFolderId) || folder.path === this._activeFolderId) {
+            item.classList.add('active');
+        }
+
+        const name = document.createElement('span');
+        name.className = 'folder-name';
+        name.textContent = this._displayName(folder.name);
+
+        const count = document.createElement('span');
+        count.className = 'folder-count';
+        count.textContent = folder.image_count;
+
+        item.appendChild(name);
+        item.appendChild(count);
+
+        if (this._importingPaths.has(folder.path)) {
+            const badge = document.createElement('span');
+            badge.className = 'folder-badge badge-importing';
+            badge.textContent = 'Importing';
+            item.appendChild(badge);
+        } else if (folder.manual_reviewed) {
+            const badge = document.createElement('span');
+            badge.className = 'folder-badge badge-readonly';
+            badge.textContent = 'Read Only';
+            item.appendChild(badge);
+        }
+
+        item.addEventListener('click', () => {
+            if (this._importingPaths.has(folder.path)) {
+                this._showImportingMessage(folder);
+            } else if (folder.imported) {
+                this._selectFolder(folder);
+            } else {
+                this._importFolder(folder);
+            }
+        });
+
+        return item;
+    },
+
     _renderFolderList() {
         const list = document.getElementById('folder-list');
         list.innerHTML = '';
 
-        this._folders.forEach(folder => {
-            const item = document.createElement('div');
-            item.className = 'folder-item';
-            if ((folder.id && folder.id === this._activeFolderId) || folder.path === this._activeFolderId) {
-                item.classList.add('active');
+        // Separate flat folders from grouped ones
+        const flatFolders = this._folders.filter(f => !f.parent);
+        const groupedByParent = {};
+        this._folders.forEach(f => {
+            if (f.parent) {
+                if (!groupedByParent[f.parent]) groupedByParent[f.parent] = [];
+                groupedByParent[f.parent].push(f);
             }
+        });
 
-            const name = document.createElement('span');
-            name.className = 'folder-name';
-            name.textContent = folder.name;
+        // Render flat folders first
+        flatFolders.forEach(folder => {
+            list.appendChild(this._renderFolderItem(folder));
+        });
 
-            const count = document.createElement('span');
-            count.className = 'folder-count';
-            count.textContent = folder.image_count;
+        // Render groups
+        this._groups.forEach(group => {
+            const children = groupedByParent[group.name] || [];
+            if (children.length === 0) return;
 
-            item.appendChild(name);
-            item.appendChild(count);
+            const isExpanded = this._expandedGroups.has(group.name);
+            const totalImages = children.reduce((sum, f) => sum + (f.image_count || 0), 0);
+            const metaText = `${children.length} folders \u00B7 ${totalImages} imgs`;
 
-            if (this._importingPaths.has(folder.path)) {
-                const badge = document.createElement('span');
-                badge.className = 'folder-badge badge-importing';
-                badge.textContent = 'Importing';
-                item.appendChild(badge);
-            } else if (folder.manual_reviewed) {
-                const badge = document.createElement('span');
-                badge.className = 'folder-badge badge-readonly';
-                badge.textContent = 'Read Only';
-                item.appendChild(badge);
-            }
+            const wrapper = document.createElement('div');
+            wrapper.className = 'folder-group';
 
-            item.addEventListener('click', () => {
-                if (this._importingPaths.has(folder.path)) {
-                    this._showImportingMessage(folder);
-                } else if (folder.imported) {
-                    this._selectFolder(folder);
+            // Group header row
+            const header = document.createElement('div');
+            header.className = 'folder-group-header';
+            header.addEventListener('click', () => {
+                if (this._expandedGroups.has(group.name)) {
+                    this._expandedGroups.delete(group.name);
                 } else {
-                    this._importFolder(folder);
+                    this._expandedGroups.add(group.name);
                 }
+                this._renderFolderList();
             });
 
-            list.appendChild(item);
+            const arrow = document.createElement('span');
+            arrow.className = 'toggle-arrow' + (isExpanded ? ' expanded' : '');
+
+            const headerName = document.createElement('span');
+            headerName.className = 'folder-name';
+            headerName.textContent = this._displayName(group.name);
+
+            header.appendChild(arrow);
+            header.appendChild(headerName);
+            wrapper.appendChild(header);
+
+            // Expanded: per-child thread segments with curl on last
+            if (isExpanded) {
+                const childContainer = document.createElement('div');
+                childContainer.className = 'folder-group-children';
+
+                const collapseThread = (e) => {
+                    e.stopPropagation();
+                    this._expandedGroups.delete(group.name);
+                    this._renderFolderList();
+                };
+
+                children.forEach((folder, idx) => {
+                    const row = document.createElement('div');
+                    row.className = 'thread-row';
+
+                    const seg = document.createElement('div');
+                    const isLast = idx === children.length - 1;
+                    seg.className = 'thread-seg' + (isLast ? ' thread-seg-last' : '');
+                    seg.title = 'Collapse';
+                    seg.addEventListener('click', collapseThread);
+
+                    const item = this._renderFolderItem(folder);
+                    item.classList.add('thread-child-item');
+
+                    row.appendChild(seg);
+                    row.appendChild(item);
+                    childContainer.appendChild(row);
+                });
+
+                wrapper.appendChild(childContainer);
+            } else {
+                // Collapsed: show count as expand indicator
+                const collapsed = document.createElement('div');
+                collapsed.className = 'folder-group-collapsed';
+                collapsed.textContent = metaText;
+                collapsed.addEventListener('click', () => {
+                    this._expandedGroups.add(group.name);
+                    this._renderFolderList();
+                });
+                wrapper.appendChild(collapsed);
+            }
+
+            list.appendChild(wrapper);
         });
     },
 
@@ -197,10 +308,8 @@ const App = {
         document.getElementById('btn-export').style.display = 'none';
         document.getElementById('unit-toggle').classList.add('hidden');
 
-        // Update active state in sidebar
-        document.querySelectorAll('.folder-item').forEach((item, idx) => {
-            item.classList.toggle('active', this._folders[idx].path === folder.path);
-        });
+        // Re-render sidebar to update active state
+        this._renderFolderList();
     },
 
     async _selectFolder(folder) {
@@ -212,7 +321,7 @@ const App = {
         gridTitleEl.innerHTML = ''; // Clear existing content
 
         const folderNameSpan = document.createElement('span');
-        folderNameSpan.textContent = folder.name;
+        folderNameSpan.textContent = this._displayName(folder.name);
         gridTitleEl.appendChild(folderNameSpan);
 
         const modeIndicatorSpan = document.createElement('span');
@@ -277,10 +386,8 @@ const App = {
 
         gridTitleEl.appendChild(manualReviewedChip);
 
-        // Update active state in sidebar
-        document.querySelectorAll('.folder-item').forEach((item, idx) => {
-            item.classList.toggle('active', this._folders[idx].id === folder.id);
-        });
+        // Re-render sidebar to update active state
+        this._renderFolderList();
 
         // Show unit toggle and sync to folder's setting
         const toggle = document.getElementById('unit-toggle');
@@ -324,25 +431,38 @@ const App = {
             return;
         }
 
-        // Get first image URL for reference
-        const refUrl = API.fullImageUrl(marked[0].id);
-
-        // Fetch folder's saved ROI and manual_reviewed status
-        let savedCells = [];
-        let folderData;
+        // Check manual_reviewed status
         try {
-            folderData = await API.getFolder(this._activeFolderId);
-            if (folderData.ocr_roi) {
-                savedCells = JSON.parse(folderData.ocr_roi);
-            }
+            const folderData = await API.getFolder(this._activeFolderId);
             if (folderData.manual_reviewed) {
                 StatusFeed.warn('Read Only: This folder is protected.');
                 return;
             }
         } catch (_) { /* ignore */ }
 
-        // Open ROI overlay — actual OCR starts in the callback
-        ROI.open(this._activeFolderId, refUrl, savedCells, async (cells) => {
+        // Open ROI overlay to select tag region, then run OCR
+        const folderId = this._activeFolderId;
+        const firstImg = marked[0];
+        const imageUrl = API.fullImageUrl(firstImg.id);
+
+        // Load saved ROI from folder
+        let savedCells = null;
+        try {
+            const folderData = await API.getFolder(folderId);
+            if (folderData.ocr_roi) {
+                savedCells = typeof folderData.ocr_roi === 'string'
+                    ? JSON.parse(folderData.ocr_roi)
+                    : folderData.ocr_roi;
+            }
+        } catch (_) { /* ignore */ }
+
+        ROI.open(folderId, imageUrl, savedCells, async (cells) => {
+            // Save ROI to folder
+            if (cells && cells.length > 0) {
+                try {
+                    await API.setFolderROI(folderId, cells);
+                } catch (_) { /* ignore */ }
+            }
             await this._runOcrBatch(marked);
         });
     },
@@ -395,9 +515,13 @@ const App = {
                 // Log per-image result to status feed
                 const tag = result.tag || '???';
                 const sw = result.scale_weight != null ? result.scale_weight : '???';
+                const pipe = result.pipeline;
+                const pipeTag = pipe ? pipe.tag : '?';
+                const pipeScale = pipe ? pipe.scale : '?';
+                const pipeStr = `[tag:${pipeTag} scale:${pipeScale}]`;
 
                 doneCount++;
-                StatusFeed.info(`${img.filename}: ${tag} | scale=${sw}`);
+                StatusFeed.info(`${img.filename}: ${tag} | scale=${sw} ${pipeStr}`);
             } catch (err) {
                 errorCount++;
                 StatusFeed.info(`${img.filename}: failed — ${err.message}`);
@@ -415,12 +539,8 @@ const App = {
             `OCR complete: ${doneCount} done, ${errorCount} error(s)`
         );
 
-        // Clear saved ROI so next batch starts fresh
-        if (this._activeFolderId) {
-            try {
-                await API.setFolderROI(this._activeFolderId, []);
-            } catch (_) { /* ignore */ }
-        }
+        // Refresh folder summary after OCR batch completes
+        this.updateFolderSummary();
     },
 
     exportOcr() {

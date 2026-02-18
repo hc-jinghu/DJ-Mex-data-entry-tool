@@ -24,12 +24,21 @@ import numpy as np
 
 from .database import get_connection, row_to_dict, rows_to_dicts
 
-# Tag pattern: 3 uppercase letters + 3 digits
+# Tag pattern: 3 uppercase letters + 3 digits (used for debug visualization)
 TAG_PATTERN = re.compile(r'[A-Z]{3}\d{3}')
+# EVS tag: exactly 3 letters + 3 digits — a valid pallet identifier
+EVS_TAG_PATTERN = re.compile(r'^[A-Za-z]{3}\d{3}$')
 # Weight pattern: integer or decimal number
 WEIGHT_PATTERN = re.compile(r'\d+\.?\d*')
-# Fixed scale ROI: columns 2-4, rows 4-5 (top-middle of 5x5 grid)
-SCALE_ROI = [[2,4],[2,5],[3,4],[3,5],[4,4],[4,5]]
+# Fixed scale ROI on 8x8 grid: columns 3-6, rows 6-8 (top-middle region)
+# Origin is bottom-left: y=1 is bottom row, y=8 is top row.
+# Cols 3-6 ≈ center-horizontal, rows 6-8 ≈ top ~3/8 of image.
+SCALE_ROI = [
+    [3,6],[3,7],[3,8],
+    [4,6],[4,7],[4,8],
+    [5,6],[5,7],[5,8],
+    [6,6],[6,7],[6,8],
+]
 # Common 7-segment LED misreads → correct digit
 LED_SUBS = str.maketrans(
     'ODQ'       # → 0
@@ -112,11 +121,12 @@ def _deskew(img):
 
 
 def _ocr_tag(img):
-    """Extract tag (3 letters + 3 digits) from the ROI crop.
+    """Extract tag text from the ROI crop.
 
     Pipeline:
       1. Feed ROI crop directly to Doctr
-      2. Match detected words against tag pattern [A-Z]{3}\\d{3}
+      2. If any word matches EVS pattern [A-Za-z]{3}\\d{3}, return it immediately
+      3. Otherwise return the longest detected word (up to 30 chars)
 
     Returns (tag_string_or_None, preprocessed_img, tag_results_list).
     """
@@ -128,6 +138,9 @@ def _ocr_tag(img):
     rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     result = model([rgb])
     export = result.export()
+
+    best_word = None
+    best_len = 0
 
     # Extract words with bboxes in pixel coords of the input image
     for page in export['pages']:
@@ -144,11 +157,18 @@ def _ocr_tag(img):
                     bbox = [[wx1, wy1], [wx2, wy1], [wx2, wy2], [wx1, wy2]]
                     all_results.append((bbox, text, conf))
 
-                    matches = TAG_PATTERN.findall(text.upper())
-                    if matches:
-                        return matches[0], img, all_results
+                    # Prefer EVS tag match — return immediately
+                    upper = text.upper().strip()
+                    if EVS_TAG_PATTERN.match(upper):
+                        return upper, img, all_results
 
-    return None, img, all_results
+                    # Track longest word as fallback
+                    cleaned = text.strip()[:30]
+                    if len(cleaned) > best_len:
+                        best_word = cleaned
+                        best_len = len(cleaned)
+
+    return best_word, img, all_results
 
 
 def _deskew_led(crop):
@@ -328,6 +348,138 @@ def _ocr_scale_weight(img):
         os.unlink(tmp_path)
 
     # Parse ssocr output
+    weight = None
+    all_results = [([], raw_text, 1.0)] if raw_text else []
+    if raw_text:
+        cleaned = raw_text.replace(' ', '').replace('_', '')
+        nums = WEIGHT_PATTERN.findall(cleaned)
+        for n in nums:
+            try:
+                val = float(n)
+                if 1 <= val <= 99999:
+                    weight = val
+                    break
+            except ValueError:
+                pass
+
+    return weight, screen_crop, ssocr_input, all_results
+
+
+def _ocr_scale_weight_from_crop(scale_crop):
+    """Extract weight from a pre-cropped scale display region (from VLM).
+
+    Same pipeline as _ocr_scale_weight but skips the _crop_to_roi step
+    since the VLM already identified the scale region.
+
+    Returns (weight_or_None, led_crop_img, ssocr_input_img, results_list).
+    """
+    # Step 1: Build red mask (bright, saturated red in HSV)
+    hsv = cv2.cvtColor(scale_crop, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+    red_hue = ((h < 10) | (h > 170)).astype(np.uint8)
+    high_sat = (s > 100).astype(np.uint8)
+    bright = (v > 80).astype(np.uint8)
+    red_mask = (red_hue & high_sat & bright).astype(np.uint8) * 255
+
+    if cv2.findNonZero(red_mask) is None:
+        return None, scale_crop, None, []
+
+    # Step 2: "Black Box" contrast filter
+    dark_mask = (v < 50).astype(np.uint8) * 255
+    dk = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+    dark_dilated = cv2.dilate(dark_mask, dk, iterations=2)
+    red_near_dark = cv2.bitwise_and(red_mask, dark_dilated)
+
+    # Step 3: Cluster and score candidates
+    merge_k = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))
+    merged = cv2.dilate(red_near_dark, merge_k, iterations=3)
+    contours, _ = cv2.findContours(merged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    mh, mw = scale_crop.shape[:2]
+    best_score = -1
+    best_rect = None
+
+    edges = cv2.Canny(red_mask, 50, 150)
+
+    for cnt in contours:
+        x, y, w, h_c = cv2.boundingRect(cnt)
+        bbox_area = w * h_c
+
+        if bbox_area < 50 or bbox_area > mw * mh * 0.08:
+            continue
+        if w < mw * 0.02:
+            continue
+        aspect = w / max(h_c, 1)
+        if aspect < 1.2 or aspect > 8.0:
+            continue
+        roi_red = red_mask[y:y+h_c, x:x+w]
+        red_fill = cv2.countNonZero(roi_red) / max(bbox_area, 1)
+        if red_fill > 0.45:
+            continue
+        roi_edges = edges[y:y+h_c, x:x+w]
+        edge_density = cv2.countNonZero(roi_edges) / max(bbox_area, 1)
+        hull = cv2.convexHull(cnt)
+        hull_area = cv2.contourArea(hull)
+        solidity = cv2.contourArea(cnt) / max(hull_area, 1)
+        solidity_bonus = 1.0 if solidity < 0.6 else 0.4
+        score = edge_density * solidity_bonus * bbox_area
+
+        if score > best_score:
+            best_score = score
+            best_rect = (x, y, w, h_c)
+
+    if best_rect is None:
+        src = red_near_dark if cv2.findNonZero(red_near_dark) is not None else red_mask
+        if cv2.findNonZero(src) is None:
+            return None, scale_crop, None, []
+        blur_k = max(mw // 10, 31)
+        if blur_k % 2 == 0:
+            blur_k += 1
+        heatmap = cv2.GaussianBlur(src, (blur_k, blur_k), 0)
+        _, _, _, max_loc = cv2.minMaxLoc(heatmap)
+        cx, cy = max_loc
+        crop_w = int(mw * 0.18)
+        crop_h = int(crop_w * 0.4)
+        best_rect = (cx - crop_w // 2, cy - crop_h // 2, crop_w, crop_h)
+
+    # Crop with padding
+    bx, by, bw, bh = best_rect
+    pad_x = max(10, int(bw * 0.4))
+    pad_y = max(10, int(bh * 0.6))
+    x1 = max(0, bx - pad_x)
+    y1 = max(0, by - pad_y)
+    x2 = min(mw, bx + bw + pad_x)
+    y2 = min(mh, by + bh + pad_y)
+    screen_crop = scale_crop[y1:y2, x1:x2]
+
+    sh, sw = screen_crop.shape[:2]
+    if sh < 5 or sw < 5:
+        return None, screen_crop, None, []
+
+    # Step 4: Perspective correction (deskew)
+    deskewed = _deskew_led(screen_crop)
+
+    # Step 5: Red channel isolation + 4x upscale for ssocr
+    r_ch = deskewed[:, :, 2]
+    r_ch_up = cv2.resize(r_ch, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+    ssocr_input = r_ch_up.copy()
+
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+        tmp_path = tmp.name
+        cv2.imwrite(tmp_path, r_ch_up)
+
+    try:
+        result = subprocess.run(
+            ['ssocr', '-d', '-1', '-T', '-c', 'decimal',
+             'grayscale', 'invert', tmp_path],
+            capture_output=True, text=True, timeout=10
+        )
+        raw_text = result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        raw_text = ''
+    finally:
+        os.unlink(tmp_path)
+
     weight = None
     all_results = [([], raw_text, 1.0)] if raw_text else []
     if raw_text:
@@ -531,21 +683,23 @@ def _save_ocr_result_image(debug_dir, filename, img,
 # ── Main processing ──────────────────────────────────────────────────
 
 
-def _crop_to_roi(img, ocr_roi):
+def _crop_to_roi(img, ocr_roi, grid_size=8):
     """Crop image to the bounding box of selected ROI cells.
 
-    Grid is 5x5, X axis = columns 1-5 (left to right),
-    Y axis = rows 1-5 (bottom to top, origin at bottom-left).
+    Grid is grid_size x grid_size (default 8x8).
+    X axis = columns 1..grid_size (left to right),
+    Y axis = rows 1..grid_size (bottom to top, origin at bottom-left).
 
     Args:
         img: BGR image array.
         ocr_roi: List of [x, y] cell coordinates.
+        grid_size: Grid dimension (default 8).
 
     Returns cropped BGR image.
     """
     img_h, img_w = img.shape[:2]
-    cell_w = img_w / 5
-    cell_h = img_h / 5
+    cell_w = img_w / grid_size
+    cell_h = img_h / grid_size
 
     xs = [c[0] for c in ocr_roi]
     ys = [c[1] for c in ocr_roi]
@@ -600,18 +754,28 @@ def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_
         img = _load_image(filepath)
         img = _deskew(img)
 
-        # If ROI is set, crop for tag + HW pipelines (scale still uses full image)
-        roi_img = _crop_to_roi(img, ocr_roi) if ocr_roi else img
+        # Crop tag region: grid ROI if provided, else full image
+        if ocr_roi:
+            tag_crop = _crop_to_roi(img, ocr_roi)
+        else:
+            tag_crop = img
 
-        # Pipeline 1: Tag extraction — uses ROI crop, falls back to full image
-        tag, tag_preprocessed, tag_results = _ocr_tag(roi_img)
-        if tag is None and ocr_roi:
+        # Track which pipeline is being used for each region
+        tag_pipeline = 'grid_roi' if ocr_roi else 'full_image'
+        scale_pipeline = 'grid_roi'
+        result['pipeline'] = {'tag': tag_pipeline, 'scale': scale_pipeline}
+
+        # Pipeline 1: Tag extraction via Doctr
+        tag, tag_preprocessed, tag_results = _ocr_tag(tag_crop)
+        if tag is None and tag_crop is not img:
             tag, tag_preprocessed, tag_results = _ocr_tag(img)
+            tag_crop = img
         result['tag'] = tag
         result['raw_output']['tag_raw'] = tag
 
-        # Rename file to {tag}.jpg if tag was found
-        if tag:
+        # Rename file to {tag}.ext only if tag is a valid EVS tag
+        is_evs = tag and EVS_TAG_PATTERN.match(tag)
+        if is_evs:
             ext = os.path.splitext(image['filename'])[1]
             new_name = f"{tag}{ext}"
             if new_name != image['filename']:
@@ -631,36 +795,38 @@ def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_
                     image['filepath'] = new_filepath
                     result['renamed'] = new_name
 
-        # Save Tag ROI crop for viewer panel
-        if roi_img is not None and roi_img.size > 0:
+        # Save Tag crop for viewer panel
+        if tag_crop is not None and tag_crop.size > 0:
             tag_dir = os.path.join(library_root, '.library', 'tag_crops')
             os.makedirs(tag_dir, exist_ok=True)
             tag_base = os.path.splitext(image['filename'])[0]
             cv2.imwrite(os.path.join(tag_dir, f'{tag_base}_tagroi.jpg'),
-                        roi_img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                        tag_crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-        # Pipeline 2: Scale weight — LED isolation, deskew, red channel, ssocr
-        scale_weight, scale_img, ssocr_input, scale_results = _ocr_scale_weight(img)
+        # Pipeline 2: Scale weight via Doctr on SCALE_ROI crop
+        scale_crop = _crop_to_roi(img, SCALE_ROI)
+        scale_weight, scale_img, scale_results = _doctr_find_weight(scale_crop)
         result['raw_output']['scale_weight_raw'] = scale_weight
         if scale_weight is not None:
             result['scale_weight'] = round(scale_weight)
 
-        # Save LED crop for viewer panel
-        if scale_img is not None and scale_img.size > 0:
+        # Save scale display crop for viewer panel
+        if scale_crop is not None and scale_crop.size > 0:
             led_dir = os.path.join(library_root, '.library', 'led_crops')
             os.makedirs(led_dir, exist_ok=True)
             base = os.path.splitext(image['filename'])[0]
             cv2.imwrite(os.path.join(led_dir, f'{base}_ledcrop.jpg'),
-                        scale_img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                        scale_crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
         # Pipeline 3: Handwritten weight — postponed
-        # hw_weight, hw_preprocessed, hw_results = _ocr_handwritten_weight(roi_img)
-        # result['raw_output']['handwritten_weight_raw'] = hw_weight
-        # if hw_weight is not None:
-        #     result['handwritten_weight'] = hw_weight
         hw_weight = None
         hw_preprocessed = None
         hw_results = []
+
+        # Non-EVS tags: null out weight fields (not a valid pallet)
+        if tag and not is_evs:
+            result['scale_weight'] = None
+            result['handwritten_weight'] = None
 
         # Determine status
         errors = []
@@ -668,8 +834,6 @@ def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_
             errors.append('tag not found')
         if scale_weight is None:
             errors.append('scale weight not found')
-        # if hw_weight is None:
-        #     errors.append('handwritten weight not found')
 
         if errors:
             result['status'] = 'needs_review'
@@ -679,11 +843,10 @@ def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_
 
         # Save debug output if requested
         if debug_dir:
-            # Draw ROI boundaries on original image for debug visibility
             debug_img = img.copy()
             img_h, img_w = img.shape[:2]
-            cell_w = img_w / 5
-            cell_h = img_h / 5
+            cell_w = img_w / 8
+            cell_h = img_h / 8
             if ocr_roi:
                 xs = [c[0] for c in ocr_roi]
                 ys = [c[1] for c in ocr_roi]
@@ -694,7 +857,6 @@ def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_
                 cv2.rectangle(debug_img, (px_x1, px_y1), (px_x2, px_y2), _CYAN, 4)
                 cv2.putText(debug_img, "TAG ROI", (px_x1 + 8, px_y1 + 30),
                             _FONT, 0.8, _CYAN, 2, cv2.LINE_AA)
-            # Draw fixed scale ROI
             sxs = [c[0] for c in SCALE_ROI]
             sys_ = [c[1] for c in SCALE_ROI]
             spx_x1 = int((min(sxs) - 1) * cell_w)
@@ -707,7 +869,7 @@ def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_
             _save_ocr_result_image(
                 debug_dir, image['filename'], debug_img,
                 tag_preprocessed, tag_results,
-                scale_img, ssocr_input, scale_results,
+                scale_img, None, scale_results,
                 result
             )
 

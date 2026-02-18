@@ -26,6 +26,14 @@ const Shortcuts = {
         const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
         if (inInput && e.key !== 'Tab') return;
 
+        if (Settings.isOpen) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                Settings.close();
+            }
+            return;
+        }
+
         if (ROI.isOpen) {
             this._handleROI(e);
             return;

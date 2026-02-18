@@ -588,13 +588,17 @@ const Grid = {
         }
     },
 
+    _isEvsTag(tag) {
+        return tag && /^[A-Za-z]{3}\d{3}$/.test(tag);
+    },
+
     _updateOcrBadges() {
         const cards = this._gridEl.children;
         for (const card of cards) {
             const imageId = parseInt(card.dataset.imageId);
             const ocr = this._ocrResults[imageId];
             const nameEl = card.querySelector('.thumb-filename');
-            if (nameEl && ocr && ocr.tag) {
+            if (nameEl && ocr && this._isEvsTag(ocr.tag)) {
                 nameEl.classList.add('thumb-renamed');
             }
         }
@@ -612,8 +616,12 @@ const Grid = {
         if (!card) return;
 
         const nameEl = card.querySelector('.thumb-filename');
-        if (nameEl && result.tag) {
-            nameEl.classList.add('thumb-renamed');
+        if (nameEl) {
+            if (this._isEvsTag(result.tag)) {
+                nameEl.classList.add('thumb-renamed');
+            } else {
+                nameEl.classList.remove('thumb-renamed');
+            }
         }
     },
 
@@ -670,10 +678,12 @@ const Grid = {
                 const nameEl = card.querySelector('.thumb-filename');
                 if (nameEl) {
                     nameEl.textContent = img.filename;
-                    // Green background if OCR renamed this file
+                    // Green background only for EVS-tagged files
                     const ocr = this._ocrResults[imageId];
-                    if (ocr && ocr.tag) {
+                    if (ocr && this._isEvsTag(ocr.tag)) {
                         nameEl.classList.add('thumb-renamed');
+                    } else {
+                        nameEl.classList.remove('thumb-renamed');
                     }
                 }
                 if (newStatus !== 'active') {

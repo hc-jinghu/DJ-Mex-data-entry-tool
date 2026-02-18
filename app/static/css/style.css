@@ -108,6 +108,147 @@ body {
     background: rgba(46, 204, 113, 0.4);
 }
 
+/* ── Folder Group (Reddit-thread style) ─────────────────── */
+.folder-group {
+    border-bottom: 1px solid var(--border);
+}
+
+.folder-group-header {
+    display: flex;
+    align-items: center;
+    padding: 8px 8px 4px 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.folder-group-header:hover { background: var(--bg-hover); }
+
+/* Line-style chevron arrows: > collapsed, v expanded */
+.toggle-arrow {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 18px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin-right: 5px;
+    line-height: 1;
+}
+
+.toggle-arrow::before {
+    content: '\203A'; /* › right single guillemet */
+    display: inline-block;
+    transition: transform 0.15s ease;
+}
+
+.toggle-arrow.expanded::before {
+    content: '\203A'; /* same › rotated 90° clockwise */
+    transform: rotate(90deg);
+}
+
+.folder-group-header .folder-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* Children container */
+.folder-group-children {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Each child row: thread segment + folder item */
+.thread-row {
+    display: flex;
+    align-items: stretch;
+}
+
+/* Thread segment: vertical line with optional L-curl on last */
+.thread-seg {
+    /* Center under the arrow: 12px header-pad + 7px (center of 14px arrow) = 19px, minus 1px for the 2px line center */
+    width: 20px;
+    min-width: 20px;
+    position: relative;
+    cursor: pointer;
+}
+
+/* Vertical line — runs full height for non-last items */
+.thread-seg::before {
+    content: '';
+    position: absolute;
+    left: 19px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border);
+    transition: background 0.15s;
+}
+
+/* Horizontal tick into the child item */
+.thread-seg::after {
+    content: '';
+    position: absolute;
+    left: 19px;
+    top: 50%;
+    width: 6px;
+    height: 2px;
+    background: var(--border);
+    transition: background 0.15s;
+}
+
+/* Last child: L-shaped curve using border instead of solid fills */
+.thread-seg.thread-seg-last::before {
+    bottom: 50%;
+    background: none;
+    width: 8px;
+    border-left: 2px solid var(--border);
+    border-bottom: 2px solid var(--border);
+    border-bottom-left-radius: 6px;
+}
+
+.thread-seg.thread-seg-last::after {
+    display: none;
+}
+
+/* Hover override for last child border-based curve */
+.thread-seg.thread-seg-last:hover::before {
+    background: none;
+    border-left-color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* Hover: highlight entire thread in accent color */
+.thread-seg:hover::before,
+.thread-seg:hover::after {
+    background: var(--accent);
+}
+
+/* Child folder item inside thread row */
+.thread-child-item {
+    flex: 1;
+    min-width: 0;
+    border-bottom: none;
+    padding-left: 10px;
+}
+
+/* Collapsed indicator: shows folder/image count, clickable to expand */
+.folder-group-collapsed {
+    padding: 0 12px 6px 32px;
+    font-size: 10px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.1s;
+}
+
+.folder-group-collapsed:hover {
+    color: var(--accent);
+}
+
 .folder-name {
     white-space: nowrap;
     overflow: hidden;
@@ -879,8 +1020,8 @@ body {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    grid-template-rows: repeat(5, 1fr);
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
 }
 
 .roi-cell {
@@ -1103,10 +1244,187 @@ body {
     background: var(--accent-dim);
 }
 
+/* ── Left Panel Footer (gear icon) ───────────────────────── */
+#left-panel-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 6px 10px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.btn-settings {
+    font-size: 24px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
+}
+
+.btn-settings:hover {
+    color: var(--text-primary);
+}
+
 .btn-auth {
     font-size: 10px !important;
     padding: 2px 6px !important;
     margin-left: auto;
+}
+
+/* ── Settings Overlay ───────────────────────────────────── */
+#settings-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 2500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#settings-overlay.hidden { display: none; }
+
+#settings-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 560px;
+    max-width: 90vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+#settings-header h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+#settings-close {
+    font-size: 20px;
+    color: var(--text-muted);
+    cursor: pointer;
+    line-height: 1;
+}
+
+#settings-close:hover {
+    color: var(--text-primary);
+}
+
+#settings-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+#settings-nav {
+    width: 140px;
+    min-width: 140px;
+    border-right: 1px solid var(--border);
+    background: var(--bg-primary);
+    padding: 8px 0;
+    overflow-y: auto;
+}
+
+.settings-nav-item {
+    padding: 8px 14px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-left: 2px solid transparent;
+}
+
+.settings-nav-item:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.settings-nav-item.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    background: var(--bg-tertiary);
+}
+
+#settings-content {
+    flex: 1;
+    padding: 16px 20px;
+    overflow-y: auto;
+}
+
+.settings-section h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+#settings-add-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+#settings-add-row input {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+}
+
+#settings-code-input {
+    width: 80px;
+    flex-shrink: 0;
+}
+
+#settings-desc-input {
+    flex: 1;
+}
+
+#settings-item-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.settings-item-row {
+    display: flex;
+    gap: 10px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+
+.settings-item-code {
+    font-weight: 600;
+    color: var(--accent);
+    min-width: 60px;
+}
+
+.settings-item-desc {
+    color: var(--text-secondary);
+}
+
+.settings-loading,
+.settings-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 12px 0;
+    text-align: center;
 }
 
 /* Manual Reviewed Chip in Grid Title */

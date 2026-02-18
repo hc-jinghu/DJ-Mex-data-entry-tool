@@ -1,14 +1,15 @@
 /**
- * ROI grid overlay — 5x5 cell selector for OCR region of interest.
+ * ROI grid overlay — 8x8 cell selector for OCR region of interest.
  *
- * Grid coordinates: X = columns 1-5 (left to right),
- * Y = rows 1-5 (bottom to top, origin at bottom-left).
+ * Grid coordinates: X = columns 1-8 (left to right),
+ * Y = rows 1-8 (bottom to top, origin at bottom-left).
  */
 const ROI = {
     _folderId: null,
     _selectedCells: new Set(),   // "x,y" strings
     _onConfirm: null,
     _built: false,
+    _gridSize: 8,
 
     get isOpen() {
         return !document.getElementById('roi-overlay').classList.contains('hidden');
@@ -22,11 +23,11 @@ const ROI = {
     _buildGrid() {
         if (this._built) return;
         const grid = document.getElementById('roi-grid');
-        // Build 25 cells: row 0 = top of image = y=5, row 4 = bottom = y=1
-        for (let row = 0; row < 5; row++) {
-            for (let col = 0; col < 5; col++) {
+        const gs = this._gridSize;
+        for (let row = 0; row < gs; row++) {
+            for (let col = 0; col < gs; col++) {
                 const x = col + 1;
-                const y = 5 - row;  // top row = y5, bottom row = y1
+                const y = gs - row;  // top row = y=gridSize, bottom row = y=1
                 const cell = document.createElement('div');
                 cell.className = 'roi-cell';
                 cell.dataset.x = x;
@@ -77,21 +78,12 @@ const ROI = {
         }
     },
 
-    async _confirm() {
+    _confirm() {
         const cells = [];
         this._selectedCells.forEach(key => {
             const [x, y] = key.split(',').map(Number);
             cells.push([x, y]);
         });
-
-        // Save ROI to folder
-        if (this._folderId) {
-            try {
-                await API.setFolderROI(this._folderId, cells);
-            } catch (err) {
-                StatusFeed.error(`Failed to save ROI: ${err.message}`);
-            }
-        }
 
         const cb = this._onConfirm;
         this.close();

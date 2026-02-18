@@ -170,14 +170,48 @@ def create_app():
 
     @app.route('/api/item_codes', methods=['GET'])
     def get_item_codes():
-        """Get the item codes dictionary."""
+        """Get the item codes as {code: description} dict."""
         item_codes_path = os.path.join(LIBRARY_ROOT, '.library', 'item_codes.json')
         if not os.path.exists(item_codes_path):
-            return jsonify({'error': 'item_codes.json not found'}), 404
+            return jsonify({})
 
         with open(item_codes_path, 'r') as f:
             item_codes = json.load(f)
         return jsonify(item_codes)
+
+    @app.route('/api/item_codes', methods=['POST'])
+    @require_role('data_entry')
+    def add_item_code():
+        """Add a new item code to .library/item_codes.json."""
+        data = request.get_json()
+        code = data.get('code', '').strip()
+        description = data.get('description', '').strip()
+
+        if not code:
+            return jsonify({'error': 'code is required'}), 400
+        if not description:
+            return jsonify({'error': 'description is required'}), 400
+
+        item_codes_path = os.path.join(LIBRARY_ROOT, '.library', 'item_codes.json')
+        os.makedirs(os.path.dirname(item_codes_path), exist_ok=True)
+
+        if os.path.exists(item_codes_path):
+            with open(item_codes_path, 'r') as f:
+                item_codes = json.load(f)
+        else:
+            item_codes = {}
+
+        if code in item_codes:
+            return jsonify({'error': f'code {code} already exists'}), 409
+
+        item_codes[code] = description
+
+        # Sort by key and write back
+        sorted_codes = dict(sorted(item_codes.items()))
+        with open(item_codes_path, 'w') as f:
+            json.dump(sorted_codes, f, indent=4)
+
+        return jsonify(sorted_codes)
 
     # ── Folder endpoints ────────────────────────────────────────────
 
@@ -207,8 +241,9 @@ def create_app():
                 if r['inode']:
                     db_inodes[r['inode']] = f['id']
 
-        # Scan disk directories
+        # Scan disk directories (flat + one level of nesting)
         disk_dirs = []
+        groups = []
         for entry in sorted(os.listdir(LIBRARY_ROOT)):
             full_path = os.path.join(LIBRARY_ROOT, entry)
             if not os.path.isdir(full_path) or entry.startswith('.') or entry in ('app', '__pycache__'):
@@ -219,16 +254,38 @@ def create_app():
                 and not fn.startswith('.')
             ]
             if image_files:
-                disk_dirs.append((entry, full_path, image_files))
+                # Flat folder with images
+                disk_dirs.append((entry, full_path, image_files, None))
+            else:
+                # Check for nested child folders with images
+                child_count = 0
+                for child_entry in sorted(os.listdir(full_path)):
+                    child_path = os.path.join(full_path, child_entry)
+                    if not os.path.isdir(child_path) or child_entry.startswith('.'):
+                        continue
+                    child_images = [
+                        fn for fn in os.listdir(child_path)
+                        if fn.lower().endswith(('.jpg', '.jpeg', '.png', '.tiff', '.heic'))
+                        and not fn.startswith('.')
+                    ]
+                    if child_images:
+                        rel_path = os.path.join(entry, child_entry)
+                        disk_dirs.append((child_entry, child_path, child_images, entry))
+                        child_count += 1
+                if child_count > 0:
+                    groups.append({'name': entry, 'folder_count': child_count})
         print(f"DEBUG: list_folders - Disk directories found: {[d[0] for d in disk_dirs]}")
         sys.stdout.flush()
 
         matched_ids = set()
         all_folders = []
 
-        for entry, full_path, image_files in disk_dirs:
+        for entry, full_path, image_files, parent in disk_dirs:
+            # Build the relative path (nested: "parent/child", flat: "entry")
+            rel_path = os.path.join(parent, entry) if parent else entry
+
             # Direct path match
-            match = next((f for f in imported if f['path'] == entry), None)
+            match = next((f for f in imported if f['path'] == rel_path), None)
 
             # If no direct match, try inode matching (folder was renamed)
             if not match:
@@ -247,21 +304,21 @@ def create_app():
                             old_path = match['path']
                             conn.execute(
                                 "UPDATE folders SET name = ?, path = ? WHERE id = ?",
-                                (entry, entry, match['id'])
+                                (entry, rel_path, match['id'])
                             )
                             conn.execute(
                                 "UPDATE images SET filepath = REPLACE(filepath, ?, ?) WHERE folder_id = ?",
-                                (old_path + '/', entry + '/', match['id'])
+                                (old_path + '/', rel_path + '/', match['id'])
                             )
                             conn.commit()
                             match['name'] = entry
-                            match['path'] = entry
+                            match['path'] = rel_path
                             break
 
             if match:
                 matched_ids.add(match['id'])
                 # Ensure manual_reviewed is present, default to False if not in DB (old records)
-                match_dict = {**match, 'imported': True}
+                match_dict = {**match, 'imported': True, 'parent': parent}
                 if 'manual_reviewed' not in match_dict:
                     match_dict['manual_reviewed'] = False
                 all_folders.append(match_dict)
@@ -269,10 +326,11 @@ def create_app():
                 all_folders.append({
                     'id': None,
                     'name': entry,
-                    'path': entry,
+                    'path': rel_path,
                     'image_count': len(image_files),
                     'imported': False,
                     'manual_reviewed': False,
+                    'parent': parent,
                 })
 
         conn.close()
@@ -283,7 +341,7 @@ def create_app():
 
         print(f"DEBUG: list_folders - Final all_folders to return: {all_folders}")
         sys.stdout.flush()
-        return jsonify(all_folders)
+        return jsonify({'folders': all_folders, 'groups': groups})
 
     @app.route('/api/folders/import', methods=['POST'])
     @require_role('data_entry')
@@ -649,7 +707,7 @@ def create_app():
         conn.close()
         return jsonify({'weight_unit': weight_unit})
 
-    # ── Folder ROI endpoint ────────────────────────────────────────────
+    # ── Folder ROI endpoint ──────────────────────────────────────
 
     @app.route('/api/folders/<int:folder_id>/roi', methods=['PUT'])
     @require_role('data_entry')
@@ -713,6 +771,7 @@ def create_app():
                 'handwritten_weight': result['handwritten_weight'],
                 'status': result['status'],
                 'error_message': result.get('error_message'),
+                'pipeline': result.get('pipeline'),
             }
             if result.get('renamed'):
                 resp['renamed'] = result['renamed']
@@ -721,6 +780,19 @@ def create_app():
             import traceback
             traceback.print_exc()
             return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/ocr/vlm-status', methods=['GET'])
+    def vlm_status():
+        """Check if Ollama VLM is available."""
+        try:
+            import requests as req
+            r = req.get('http://localhost:11434/api/tags', timeout=5)
+            r.raise_for_status()
+            models = [m['name'] for m in r.json().get('models', [])]
+            has_model = any('minicpm-v' in m or 'minicpm-v2.6' in m for m in models)
+            return jsonify({'available': has_model, 'models': models})
+        except Exception:
+            return jsonify({'available': False, 'models': []})
 
     @app.route('/api/ocr/submit', methods=['POST'])
     @require_role('data_entry')
@@ -825,6 +897,9 @@ def create_app():
     @require_role('data_entry', 'warehouse')
     def update_ocr_result(image_id):
         """Manually update OCR result (for human review corrections)."""
+        import re
+        evs_pattern = re.compile(r'^[A-Za-z]{3}\d{3}$')
+
         data = request.get_json()
         conn = get_connection()
 
@@ -833,12 +908,31 @@ def create_app():
         if g.user_role == 'warehouse':
             allowed_keys = ('tare_weight',)
 
+        # Enforce 30-char max on tag
+        if 'tag' in data and data['tag']:
+            data['tag'] = str(data['tag'])[:30]
+
         fields = []
         values = []
         for key in allowed_keys:
             if key in data:
                 fields.append(f"{key} = ?")
                 values.append(data[key])
+
+        # If tag is being updated, check EVS validity
+        new_tag = data.get('tag')
+        if new_tag is not None and 'tag' in allowed_keys:
+            is_evs = bool(new_tag) and evs_pattern.match(new_tag)
+            if not is_evs:
+                # Non-EVS: null out item, scale_weight, tare_weight
+                for null_field in ('item', 'scale_weight', 'tare_weight'):
+                    if f"{null_field} = ?" not in fields:
+                        fields.append(f"{null_field} = ?")
+                        values.append(None)
+                    else:
+                        # Override any value the client sent
+                        idx = fields.index(f"{null_field} = ?")
+                        values[idx] = None
 
         if not fields:
             conn.close()

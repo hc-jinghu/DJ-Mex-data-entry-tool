@@ -226,28 +226,34 @@ const Viewer = {
         // Skip tag/item/scale_weight/tare_weight if image hasn't been OCR'd yet
         if (isPending) return;
 
+        // EVS tag check: only EVS tags unlock weight/item fields
+        const isEvs = /^[A-Za-z]{3}\d{3}$/.test(ocr.tag);
+
         // For warehouse: tag, item, scale_weight are always read-only
         const mainFieldsReadonly = isReadonly || role === 'warehouse' || role === 'viewer';
 
-        // Tag — editable (data_entry only)
+        // Tag — editable (data_entry only), 30 char max
         this._ocrDetailEl.appendChild(
-            this._editableRow('tag', ocr.tag || '', imageId, mainFieldsReadonly)
+            this._editableRow('tag', ocr.tag || '', imageId, mainFieldsReadonly, { maxLength: 30, isTagField: true })
         );
 
-        // Item — searchable dropdown (data_entry only)
+        // Item, scale_weight, tare_weight — locked if tag is not EVS
+        const evsLockedReadonly = !isEvs || mainFieldsReadonly;
+
+        // Item — searchable dropdown (data_entry only, EVS tags only)
         this._ocrDetailEl.appendChild(
-            this._itemDropdownRow('item', ocr.item || '', imageId, mainFieldsReadonly)
+            this._itemDropdownRow('item', isEvs ? (ocr.item || '') : '', imageId, evsLockedReadonly)
         );
 
-        // Scale weight — editable (data_entry only)
+        // Scale weight — editable (data_entry only, EVS tags only)
         this._ocrDetailEl.appendChild(
-            this._editableRow('scale_weight', ocr.scale_weight != null ? String(ocr.scale_weight) : '', imageId, mainFieldsReadonly)
+            this._editableRow('scale_weight', isEvs && ocr.scale_weight != null ? String(ocr.scale_weight) : '', imageId, evsLockedReadonly)
         );
 
-        // Tare weight — editable for data_entry and warehouse
-        const tareReadonly = isReadonly || role === 'viewer';
+        // Tare weight — editable for data_entry and warehouse (EVS tags only)
+        const tareReadonly = !isEvs || isReadonly || role === 'viewer';
         this._ocrDetailEl.appendChild(
-            this._editableRow('tare_weight', ocr.tare_weight != null ? String(ocr.tare_weight) : '', imageId, tareReadonly)
+            this._editableRow('tare_weight', isEvs && ocr.tare_weight != null ? String(ocr.tare_weight) : '', imageId, tareReadonly)
         );
     },
 
@@ -401,7 +407,7 @@ const Viewer = {
         return row;
     },
 
-    _editableRow(field, value, imageId, isReadonly) {
+    _editableRow(field, value, imageId, isReadonly, opts = {}) {
         const row = document.createElement('div');
         row.className = 'ocr-prop';
 
@@ -426,6 +432,7 @@ const Viewer = {
             input.type = 'text';
             input.className = 'ocr-edit-input';
             input.value = value;
+            if (opts.maxLength) input.maxLength = opts.maxLength;
             valSpan.textContent = '';
             valSpan.appendChild(input);
             input.focus();
@@ -458,17 +465,33 @@ const Viewer = {
                     }
                     StatusFeed.success(`Updated ${field} → ${newVal || '(cleared)'}`);
 
-                    // Rename file to {tag}.jpg when tag is edited
-                    if (field === 'tag' && newVal) {
-                        const newName = newVal + '.jpg';
-                        const img = this._images[this._currentIndex];
-                        if (img && img.id === imageId) {
-                            await API.renameImage(imageId, newName);
-                            img.filename = newName;
-                            img.filepath = img.filepath.replace(/[^/]+$/, newName);
-                            this._filenameEl.textContent = newName;
-                            Grid.updateImageInPlace(img.id, img.status);
+                    // Tag field: rename file only if new tag is EVS
+                    if (opts.isTagField && newVal) {
+                        const isNewEvs = /^[A-Za-z]{3}\d{3}$/.test(newVal);
+                        if (isNewEvs) {
+                            const img = this._images[this._currentIndex];
+                            if (img && img.id === imageId) {
+                                const ext = img.filename.replace(/^.*(\.[^.]+)$/, '$1');
+                                const newName = newVal + ext;
+                                await API.renameImage(imageId, newName);
+                                img.filename = newName;
+                                img.filepath = img.filepath.replace(/[^/]+$/, newName);
+                                this._filenameEl.textContent = newName;
+                                Grid.updateImageInPlace(img.id, img.status);
+                            }
                         }
+                        // Re-render OCR panel to update field editability
+                        if (Grid._ocrResults[imageId]) {
+                            // Also null fields in cache if non-EVS (server does this too)
+                            const isEvs = /^[A-Za-z]{3}\d{3}$/.test(newVal);
+                            if (!isEvs) {
+                                Grid._ocrResults[imageId].item = null;
+                                Grid._ocrResults[imageId].scale_weight = null;
+                                Grid._ocrResults[imageId].tare_weight = null;
+                            }
+                        }
+                        this._loadOcrPanel(imageId);
+                        Grid.updateOcrBadge(imageId, Grid._ocrResults[imageId]);
                     }
                 } catch (err) {
                     StatusFeed.error(`Save failed: ${err.message}`);

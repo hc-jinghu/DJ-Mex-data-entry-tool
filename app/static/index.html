@@ -11,6 +11,9 @@
         <div id="left-panel" class="panel">
             <div class="panel-header">Folders <button id="btn-auth" class="btn btn-sm btn-auth" title="Login">Login</button></div>
             <div id="folder-list"></div>
+            <div id="left-panel-footer">
+                <button id="btn-settings" class="btn-settings" title="Settings">&#9881;</button>
+            </div>
         </div>
         <div id="center-panel" class="panel">
             <div class="panel-header">
@@ -61,6 +64,32 @@
         <div id="status-feed"></div>
     </div>
 
+    <!-- Settings overlay -->
+    <div id="settings-overlay" class="hidden">
+        <div id="settings-box">
+            <div id="settings-header">
+                <h2>Settings</h2>
+                <span id="settings-close" title="Close">&times;</span>
+            </div>
+            <div id="settings-body">
+                <div id="settings-nav">
+                    <div class="settings-nav-item active" data-section="item-codes">Item Codes</div>
+                </div>
+                <div id="settings-content">
+                    <div id="settings-section-item-codes" class="settings-section">
+                        <h3>Add Item Code</h3>
+                        <div id="settings-add-row">
+                            <input type="text" id="settings-code-input" placeholder="Code (e.g. 196)" maxlength="10">
+                            <input type="text" id="settings-desc-input" placeholder="Description">
+                            <button id="settings-add-btn" class="btn btn-sm">Add</button>
+                        </div>
+                        <div id="settings-item-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Login overlay -->
     <div id="login-overlay" class="hidden">
         <div id="login-box">
@@ -107,15 +136,15 @@
         <div id="viewer-side">
             <div class="viewer-side-header">Metadata</div>
             <div id="viewer-ocr-detail"></div>
-            <div class="viewer-side-header">Tag ROI</div>
+            <div class="viewer-side-header">Label Crop</div>
             <div id="viewer-tagroi-wrap" class="viewer-crop-wrap">
                 <img id="viewer-tagroi-img" class="hidden">
-                <div id="viewer-tagroi-empty" class="viewer-side-empty">No tag ROI</div>
+                <div id="viewer-tagroi-empty" class="viewer-side-empty">No label crop</div>
             </div>
-            <div class="viewer-side-header">LED Crop</div>
+            <div class="viewer-side-header">Scale Display Crop</div>
             <div id="viewer-led-wrap" class="viewer-crop-wrap">
                 <img id="viewer-led-img" class="hidden">
-                <div id="viewer-led-empty" class="viewer-side-empty">No LED crop</div>
+                <div id="viewer-led-empty" class="viewer-side-empty">No scale crop</div>
             </div>
         </div>
     </div>
@@ -165,6 +194,7 @@
     <script src="/static/js/culler.js"></script>
     <script src="/static/js/ocrdetail.js"></script>
     <script src="/static/js/roi.js"></script>
+    <script src="/static/js/settings.js"></script>
     <script src="/static/js/shortcuts.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
