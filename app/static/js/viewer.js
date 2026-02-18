@@ -251,7 +251,8 @@ const Viewer = {
         );
 
         // Tare weight — editable for data_entry and warehouse (EVS tags only)
-        const tareReadonly = !isEvs || isReadonly || role === 'viewer';
+        // warehouse can always edit tare_weight, even on readonly (manual-reviewed) folders
+        const tareReadonly = !isEvs || (isReadonly && role !== 'warehouse') || role === 'viewer';
         this._ocrDetailEl.appendChild(
             this._editableRow('tare_weight', isEvs && ocr.tare_weight != null ? String(ocr.tare_weight) : '', imageId, tareReadonly)
         );
@@ -369,10 +370,24 @@ const Viewer = {
                 }
                 input.value = displayValue;
                 input.blur();
+            } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                const options = [...dropdown.querySelectorAll('.ocr-item-option[data-code]')];
+                if (!options.length) return;
+                const selectedIdx = options.findIndex(o => o.classList.contains('selected'));
+                let nextIdx;
+                if (e.key === 'ArrowDown') {
+                    nextIdx = selectedIdx < options.length - 1 ? selectedIdx + 1 : 0;
+                } else {
+                    nextIdx = selectedIdx > 0 ? selectedIdx - 1 : options.length - 1;
+                }
+                options.forEach(o => o.classList.remove('selected'));
+                options[nextIdx].classList.add('selected');
+                options[nextIdx].scrollIntoView({ block: 'nearest' });
             } else if (e.key === 'Enter') {
-                const firstOption = dropdown.querySelector('.ocr-item-option[data-code]');
-                if (firstOption) {
-                    selectOption(firstOption.dataset.code, firstOption.textContent);
+                const selectedOption = dropdown.querySelector('.ocr-item-option.selected[data-code]');
+                if (selectedOption) {
+                    selectOption(selectedOption.dataset.code, selectedOption.textContent);
                     input.blur();
                 }
             }
@@ -415,98 +430,99 @@ const Viewer = {
         label.className = 'ocr-prop-label';
         label.textContent = field;
 
-        const valSpan = document.createElement('span');
-        valSpan.className = 'ocr-prop-value';
-        if (!isReadonly) valSpan.classList.add('ocr-editable');
-        valSpan.textContent = value || '—';
-        if (!isReadonly) valSpan.title = 'Click to edit';
+        const container = document.createElement('div');
+        container.className = 'ocr-item-container';
+        if (isReadonly) container.classList.add('grid-readonly');
 
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'ocr-item-input';
+        input.value = value;
+        input.autocomplete = 'off';
+        if (opts.maxLength) input.maxLength = opts.maxLength;
         if (isReadonly) {
-            row.appendChild(label);
-            row.appendChild(valSpan);
-            return row;
+            input.readOnly = true;
+            input.disabled = true;
         }
 
-        valSpan.addEventListener('click', () => {
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'ocr-edit-input';
-            input.value = value;
-            if (opts.maxLength) input.maxLength = opts.maxLength;
-            valSpan.textContent = '';
-            valSpan.appendChild(input);
-            input.focus();
-            input.select();
-
-            const commit = async () => {
-                const newVal = input.value.trim();
-                input.replaceWith();
-                valSpan.textContent = newVal || '—';
-
-                if (newVal === value) return;
-                value = newVal;
-
-                const payload = {};
-                if (field === 'scale_weight' || field === 'tare_weight') {
-                    payload[field] = newVal ? parseFloat(newVal) : null;
-                } else {
-                    payload[field] = newVal || null;
-                }
-
-                try {
-                    await API.updateOcrResult(imageId, payload);
-                    // Update grid cache
-                    if (Grid._ocrResults[imageId]) {
-                        Grid._ocrResults[imageId][field] = payload[field];
-                        // Refresh grid's metadata panel if it's showing this image
-                        if (OcrDetail._currentImageId === imageId) {
-                            OcrDetail.show(imageId);
-                        }
-                    }
-                    StatusFeed.success(`Updated ${field} → ${newVal || '(cleared)'}`);
-
-                    // Tag field: rename file only if new tag is EVS
-                    if (opts.isTagField && newVal) {
-                        const isNewEvs = /^[A-Za-z]{3}\d{3}$/.test(newVal);
-                        if (isNewEvs) {
-                            const img = this._images[this._currentIndex];
-                            if (img && img.id === imageId) {
-                                const ext = img.filename.replace(/^.*(\.[^.]+)$/, '$1');
-                                const newName = newVal + ext;
-                                await API.renameImage(imageId, newName);
-                                img.filename = newName;
-                                img.filepath = img.filepath.replace(/[^/]+$/, newName);
-                                this._filenameEl.textContent = newName;
-                                Grid.updateImageInPlace(img.id, img.status);
-                            }
-                        }
-                        // Re-render OCR panel to update field editability
-                        if (Grid._ocrResults[imageId]) {
-                            // Also null fields in cache if non-EVS (server does this too)
-                            const isEvs = /^[A-Za-z]{3}\d{3}$/.test(newVal);
-                            if (!isEvs) {
-                                Grid._ocrResults[imageId].item = null;
-                                Grid._ocrResults[imageId].scale_weight = null;
-                                Grid._ocrResults[imageId].tare_weight = null;
-                            }
-                        }
-                        this._loadOcrPanel(imageId);
-                        Grid.updateOcrBadge(imageId, Grid._ocrResults[imageId]);
-                    }
-                } catch (err) {
-                    StatusFeed.error(`Save failed: ${err.message}`);
-                }
-            };
-
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commit(); }
-                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); input.replaceWith(); valSpan.textContent = value || '—'; }
-            });
-            input.addEventListener('blur', commit);
-        });
-
+        container.appendChild(input);
         row.appendChild(label);
-        row.appendChild(valSpan);
+        row.appendChild(container);
+
+        if (isReadonly) return row;
+
+        const commit = async () => {
+            const newVal = input.value.trim();
+            if (newVal === value) return;
+            const oldValue = value;
+            value = newVal;
+            input.value = newVal;
+
+            const payload = {};
+            if (field === 'scale_weight' || field === 'tare_weight') {
+                payload[field] = newVal ? parseFloat(newVal) : null;
+            } else {
+                payload[field] = newVal || null;
+            }
+
+            // Step 1: save the field value
+            try {
+                await API.updateOcrResult(imageId, payload);
+                if (Grid._ocrResults[imageId]) {
+                    Grid._ocrResults[imageId][field] = payload[field];
+                    if (OcrDetail._currentImageId === imageId) {
+                        OcrDetail.show(imageId);
+                    }
+                }
+                StatusFeed.success(`Updated ${field} → ${newVal || '(cleared)'}`);
+            } catch (err) {
+                value = oldValue;
+                input.value = oldValue;
+                StatusFeed.error(`Save failed: ${err.message}`);
+                return;
+            }
+
+            // Step 2: tag-specific actions — always re-render panel so locked fields
+            // update immediately without requiring the viewer to be closed/reopened
+            if (opts.isTagField) {
+                if (Grid._ocrResults[imageId]) {
+                    const isEvs = /^[A-Za-z]{3}\d{3}$/.test(newVal);
+                    if (!isEvs) {
+                        Grid._ocrResults[imageId].item = null;
+                        Grid._ocrResults[imageId].scale_weight = null;
+                        Grid._ocrResults[imageId].tare_weight = null;
+                    }
+                }
+                this._loadOcrPanel(imageId);
+                Grid.updateOcrBadge(imageId, Grid._ocrResults[imageId]);
+
+                // Step 3: rename file if tag is EVS (separate try so rename failure
+                // doesn't prevent the panel from having already refreshed above)
+                if (newVal && /^[A-Za-z]{3}\d{3}$/.test(newVal)) {
+                    const img = this._images[this._currentIndex];
+                    if (img && img.id === imageId) {
+                        const ext = img.filename.replace(/^.*(\.[^.]+)$/, '$1');
+                        const newName = newVal + ext;
+                        try {
+                            await API.renameImage(imageId, newName);
+                            img.filename = newName;
+                            img.filepath = img.filepath.replace(/[^/]+$/, newName);
+                            this._filenameEl.textContent = newName;
+                            Grid.updateImageInPlace(img.id, img.status);
+                        } catch (renameErr) {
+                            StatusFeed.error(`Rename failed: ${renameErr.message}`);
+                        }
+                    }
+                }
+            }
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); input.blur(); }
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); input.value = value; input.blur(); }
+        });
+        input.addEventListener('blur', commit);
+
         return row;
     },
 
@@ -532,19 +548,18 @@ const Viewer = {
     // ── TAB field cycling ────────────────────────────────────────
 
     focusNextField(reverse = false) {
-        // Focusable elements: .ocr-editable (spans) and .ocr-item-input (direct inputs)
-        const fields = Array.from(this._ocrDetailEl.querySelectorAll('.ocr-editable, .ocr-item-input'));
+        const fields = Array.from(this._ocrDetailEl.querySelectorAll('.ocr-item-input:not(:disabled)'));
         if (fields.length === 0) return;
 
         // Find which field is currently active
         let activeIdx = -1;
         const activeEl = document.activeElement;
         fields.forEach((f, i) => {
-            if (f === activeEl || f.contains(activeEl)) activeIdx = i;
+            if (f === activeEl) activeIdx = i;
         });
 
         // Blur current input to commit changes
-        if (activeEl && (activeEl.classList.contains('ocr-edit-input') || activeEl.classList.contains('ocr-item-input'))) {
+        if (activeEl && activeEl.classList.contains('ocr-item-input')) {
             activeEl.blur();
         }
 
@@ -558,14 +573,10 @@ const Viewer = {
             if (nextIdx >= fields.length) nextIdx = 0;
         }
 
-        const nextField = fields[nextIdx];
         // Small delay to let blur/commit finish before focusing next
         setTimeout(() => {
-            if (nextField.classList.contains('ocr-editable')) {
-                nextField.click();
-            } else {
-                nextField.focus();
-            }
+            fields[nextIdx].focus();
+            fields[nextIdx].select();
         }, 50);
     },
 

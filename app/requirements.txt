@@ -1,8 +1,6 @@
 flask>=3.0
 pillow>=10.0
-send2trash>=1.8
-pytesseract>=0.3
 opencv-python-headless>=4.8
 numpy>=1.24
-easyocr>=1.7
+python-doctr>=1.0
 requests>=2.28
