@@ -34,7 +34,7 @@ def _recompute_sort_order(conn, folder_id):
         )
 
 
-def import_folder(library_root, folder_path):
+def import_folder(library_root, folder_path, image_root=None):
     """Sync a folder of images with the library DB.
 
     Non-destructive: compares disk state vs DB state by filename,
@@ -42,13 +42,16 @@ def import_folder(library_root, folder_path):
     check to catch EXIF-only rotation changes.
 
     Args:
-        library_root: Absolute path to the library root.
+        library_root: Absolute path to the library root (where .library/ lives).
         folder_path: Relative path of the folder (e.g. 'ALPHA').
+        image_root: Absolute path where image folders live. Defaults to library_root.
 
     Returns:
         Dict with sync results.
     """
-    full_folder = os.path.join(library_root, folder_path)
+    if image_root is None:
+        image_root = library_root
+    full_folder = os.path.join(image_root, folder_path)
     folder_name = os.path.basename(folder_path)
 
     # Build disk state: { filename: (inode, file_size) }

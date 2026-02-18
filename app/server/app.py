@@ -19,6 +19,31 @@ LIBRARY_ROOT = os.getcwd()
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # app/
 
 
+def _settings_path():
+    return os.path.join(LIBRARY_ROOT, '.library', 'settings.json')
+
+
+def _load_settings():
+    path = _settings_path()
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_settings(data):
+    path = _settings_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=4)
+
+
+IMAGE_ROOT = _load_settings().get('image_root') or LIBRARY_ROOT
+
+
 def _clear_all_marks():
     """Reset all marked images to active on shutdown."""
     try:
@@ -213,6 +238,32 @@ def create_app():
 
         return jsonify(sorted_codes)
 
+    # ── App settings endpoints ───────────────────────────────────────
+
+    @app.route('/api/settings', methods=['GET'])
+    def get_app_settings():
+        """Return current app settings."""
+        return jsonify({'image_root': IMAGE_ROOT})
+
+    @app.route('/api/settings', methods=['POST'])
+    @require_role('data_entry')
+    def update_app_settings():
+        """Update app settings (image_root, etc.)."""
+        global IMAGE_ROOT
+        data = request.get_json()
+        new_root = (data.get('image_root') or '').strip()
+        if not new_root:
+            return jsonify({'error': 'image_root is required'}), 400
+        if not os.path.isabs(new_root):
+            return jsonify({'error': 'Path must be absolute (start with /)'}), 400
+        if not os.path.isdir(new_root):
+            return jsonify({'error': 'Directory not found or not accessible'}), 400
+        settings = _load_settings()
+        settings['image_root'] = new_root
+        _save_settings(settings)
+        IMAGE_ROOT = new_root
+        return jsonify({'image_root': IMAGE_ROOT})
+
     # ── Folder endpoints ────────────────────────────────────────────
 
     @app.route('/api/folders', methods=['GET'])
@@ -244,9 +295,11 @@ def create_app():
         # Scan disk directories (flat + one level of nesting)
         disk_dirs = []
         groups = []
-        for entry in sorted(os.listdir(LIBRARY_ROOT)):
-            full_path = os.path.join(LIBRARY_ROOT, entry)
-            if not os.path.isdir(full_path) or entry.startswith('.') or entry in ('app', '__pycache__'):
+        # When IMAGE_ROOT is the project root, skip app infrastructure dirs
+        _project_dirs = {'app', '__pycache__'} if IMAGE_ROOT == LIBRARY_ROOT else set()
+        for entry in sorted(os.listdir(IMAGE_ROOT)):
+            full_path = os.path.join(IMAGE_ROOT, entry)
+            if not os.path.isdir(full_path) or entry.startswith('.') or entry in _project_dirs:
                 continue
             image_files = [
                 fn for fn in os.listdir(full_path)
@@ -354,12 +407,12 @@ def create_app():
         if not folder_path:
             return jsonify({'error': 'path is required'}), 400
 
-        full_path = os.path.join(LIBRARY_ROOT, folder_path)
+        full_path = os.path.join(IMAGE_ROOT, folder_path)
         if not os.path.isdir(full_path):
             return jsonify({'error': 'folder not found'}), 404
 
         try:
-            result = do_import(LIBRARY_ROOT, folder_path)
+            result = do_import(LIBRARY_ROOT, folder_path, image_root=IMAGE_ROOT)
             return jsonify(result)
         except Exception as e:
             import traceback
@@ -409,10 +462,10 @@ def create_app():
         conn.close()
         if folder:
             folder_path = folder['path']
-            full_path = os.path.join(LIBRARY_ROOT, folder_path)
+            full_path = os.path.join(IMAGE_ROOT, folder_path)
             if os.path.isdir(full_path):
                 try:
-                    do_import(LIBRARY_ROOT, folder_path)
+                    do_import(LIBRARY_ROOT, folder_path, image_root=IMAGE_ROOT)
                 except Exception as e:
                     print(f"Sync error for folder {folder_path}: {e}")
 
@@ -467,7 +520,7 @@ def create_app():
         if not image:
             return jsonify({'error': 'not found'}), 404
 
-        full_path = os.path.join(LIBRARY_ROOT, image['filepath'])
+        full_path = os.path.join(IMAGE_ROOT, image['filepath'])
         if not os.path.exists(full_path):
             return jsonify({'error': 'file missing'}), 404
         return send_file(full_path)
@@ -486,7 +539,7 @@ def create_app():
             conn.close()
             return jsonify({'error': 'not found'}), 404
 
-        full_path = os.path.join(LIBRARY_ROOT, image['filepath'])
+        full_path = os.path.join(IMAGE_ROOT, image['filepath'])
         if not os.path.exists(full_path):
             conn.close()
             return jsonify({'error': 'file missing'}), 404
@@ -540,10 +593,10 @@ def create_app():
             conn.close()
             return jsonify({'error': 'not found'}), 404
 
-        old_full = os.path.join(LIBRARY_ROOT, image['filepath'])
+        old_full = os.path.join(IMAGE_ROOT, image['filepath'])
         folder_path = os.path.dirname(image['filepath'])
         new_filepath = os.path.join(folder_path, new_name)
-        new_full = os.path.join(LIBRARY_ROOT, new_filepath)
+        new_full = os.path.join(IMAGE_ROOT, new_filepath)
 
         if os.path.exists(new_full):
             conn.close()
@@ -616,7 +669,7 @@ def create_app():
     @require_role('data_entry')
     def execute_actions():
         from .actions import execute_pending_actions
-        result = execute_pending_actions(LIBRARY_ROOT)
+        result = execute_pending_actions(LIBRARY_ROOT, image_root=IMAGE_ROOT)
         return jsonify(result)
 
     # ── Culling endpoints ───────────────────────────────────────────
@@ -761,7 +814,7 @@ def create_app():
         debug_dir = os.path.join(LIBRARY_ROOT, '.library', 'ocr_debug')
 
         try:
-            result = process_image(LIBRARY_ROOT, image_id, debug_dir=debug_dir, weight_unit=weight_unit, ocr_roi=ocr_roi)
+            result = process_image(LIBRARY_ROOT, image_id, debug_dir=debug_dir, weight_unit=weight_unit, ocr_roi=ocr_roi, image_root=IMAGE_ROOT)
             save_ocr_result(image_id, result)
             resp = {
                 'image_id': image_id,
@@ -823,7 +876,7 @@ def create_app():
         conn.close()
 
         try:
-            summary = process_batch(LIBRARY_ROOT, image_ids)
+            summary = process_batch(LIBRARY_ROOT, image_ids, image_root=IMAGE_ROOT)
             return jsonify(summary)
         except Exception as e:
             import traceback

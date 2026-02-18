@@ -21,6 +21,11 @@ const Settings = {
             if (e.key === 'Enter') this._addItemCode();
         });
 
+        document.getElementById('settings-path-save-btn').addEventListener('click', () => this._saveLibraryPath());
+        document.getElementById('settings-path-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this._saveLibraryPath();
+        });
+
         // Nav item switching
         document.querySelectorAll('.settings-nav-item').forEach(item => {
             item.addEventListener('click', () => this._switchSection(item.dataset.section));
@@ -41,6 +46,7 @@ const Settings = {
     open() {
         document.getElementById('settings-overlay').classList.remove('hidden');
         this._loadItemCodes();
+        this._loadLibraryPath();
         document.getElementById('settings-code-input').focus();
     },
 
@@ -68,6 +74,38 @@ const Settings = {
             });
         } catch (err) {
             list.innerHTML = `<div class="settings-empty">Failed to load: ${err.message}</div>`;
+        }
+    },
+
+    async _loadLibraryPath() {
+        const input = document.getElementById('settings-path-input');
+        const status = document.getElementById('settings-path-status');
+        try {
+            const settings = await API.getSettings();
+            input.value = settings.image_root || '';
+            status.textContent = '';
+        } catch (err) {
+            status.textContent = `Failed to load: ${err.message}`;
+        }
+    },
+
+    async _saveLibraryPath() {
+        const input = document.getElementById('settings-path-input');
+        const status = document.getElementById('settings-path-status');
+        const path = input.value.trim();
+        if (!path) {
+            status.textContent = 'Path cannot be empty.';
+            return;
+        }
+        status.textContent = 'Saving…';
+        try {
+            const result = await API.updateSettings({ image_root: path });
+            input.value = result.image_root;
+            status.textContent = `Saved.`;
+            StatusFeed.success('Library path updated — refresh the folder list to see changes');
+        } catch (err) {
+            status.textContent = err.message;
+            StatusFeed.error(`Failed to save path: ${err.message}`);
         }
     },
 

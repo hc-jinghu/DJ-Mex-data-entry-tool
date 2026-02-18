@@ -74,8 +74,18 @@
             <div id="settings-body">
                 <div id="settings-nav">
                     <div class="settings-nav-item active" data-section="item-codes">Item Codes</div>
+                    <div class="settings-nav-item" data-section="library-path">Library Path</div>
                 </div>
                 <div id="settings-content">
+                    <div id="settings-section-library-path" class="settings-section" style="display:none">
+                        <h3>Image Library Path</h3>
+                        <p class="settings-hint">Absolute path to the folder containing your image subfolders. Leave as default to use the project root.</p>
+                        <div id="settings-path-row">
+                            <input type="text" id="settings-path-input" placeholder="/absolute/path/to/images" spellcheck="false">
+                            <button id="settings-path-save-btn" class="btn btn-sm">Save</button>
+                        </div>
+                        <div id="settings-path-status"></div>
+                    </div>
                     <div id="settings-section-item-codes" class="settings-section">
                         <h3>Add Item Code</h3>
                         <div id="settings-add-row">

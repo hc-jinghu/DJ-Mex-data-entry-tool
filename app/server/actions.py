@@ -77,8 +77,10 @@ def _find_original_by_inode(library_root, inode, hardlink_path):
     return None
 
 
-def execute_pending_actions(library_root):
+def execute_pending_actions(library_root, image_root=None):
     """Execute all pending deletions."""
+    if image_root is None:
+        image_root = library_root
     conn = get_connection()
 
     pending = rows_to_dicts(conn.execute(
@@ -90,7 +92,7 @@ def execute_pending_actions(library_root):
     results = {'deleted': 0, 'errors': []}
 
     for img in pending:
-        hardlink_path = os.path.join(library_root, img['filepath'])
+        hardlink_path = os.path.join(image_root, img['filepath'])
 
         try:
             # Remove the hardlink from the library

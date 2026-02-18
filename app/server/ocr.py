@@ -712,18 +712,21 @@ def _crop_to_roi(img, ocr_roi, grid_size=8):
     return img[px_y1:px_y2, px_x1:px_x2]
 
 
-def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_roi=None):
+def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_roi=None, image_root=None):
     """Process a single image for OCR.
 
     Args:
-        library_root: Path to library root.
+        library_root: Path to library root (where .library/ lives).
         image_id: Database image ID.
         debug_dir: If set, save annotated debug images to this directory.
         weight_unit: 'kg' or 'lbs' — affects scale weight whitelist.
         ocr_roi: Optional list of [x,y] grid cells for ROI cropping.
+        image_root: Path where image folders live. Defaults to library_root.
 
     Returns a dict with tag, scale_weight, handwritten_weight, status, error_message.
     """
+    if image_root is None:
+        image_root = library_root
     conn = get_connection()
     image = row_to_dict(conn.execute(
         "SELECT * FROM images WHERE id = ?", (image_id,)
@@ -735,7 +738,7 @@ def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_
                 'status': 'needs_review', 'error_message': 'Image not found in database',
                 'raw_output': {}}
 
-    filepath = os.path.join(library_root, image['filepath'])
+    filepath = os.path.join(image_root, image['filepath'])
     if not os.path.exists(filepath):
         return {'tag': None, 'scale_weight': None, 'handwritten_weight': None,
                 'status': 'needs_review', 'error_message': 'Image file not found on disk',
@@ -781,7 +784,7 @@ def process_image(library_root, image_id, debug_dir=None, weight_unit='kg', ocr_
             if new_name != image['filename']:
                 folder_path = os.path.dirname(image['filepath'])
                 new_filepath = os.path.join(folder_path, new_name)
-                new_full = os.path.join(library_root, new_filepath)
+                new_full = os.path.join(image_root, new_filepath)
                 if not os.path.exists(new_full):
                     os.rename(filepath, new_full)
                     conn2 = get_connection()
@@ -909,16 +912,17 @@ def save_ocr_result(image_id, result):
     conn.close()
 
 
-def process_batch(library_root, image_ids, progress_callback=None, debug_dir=None, weight_unit='kg', ocr_roi=None):
+def process_batch(library_root, image_ids, progress_callback=None, debug_dir=None, weight_unit='kg', ocr_roi=None, image_root=None):
     """Process a batch of images for OCR.
 
     Args:
-        library_root: Path to library root.
+        library_root: Path to library root (where .library/ lives).
         image_ids: List of image IDs to process.
         progress_callback: Optional fn(image_id, index, total, result) called after each.
         debug_dir: If set, save annotated debug images to this directory.
         weight_unit: 'kg' or 'lbs' — affects scale weight whitelist.
         ocr_roi: Optional list of [x,y] grid cells for ROI cropping.
+        image_root: Path where image folders live. Defaults to library_root.
 
     Returns:
         Summary dict with counts.
@@ -926,7 +930,7 @@ def process_batch(library_root, image_ids, progress_callback=None, debug_dir=Non
     summary = {'total': len(image_ids), 'done': 0, 'needs_review': 0, 'errors': 0}
 
     for idx, image_id in enumerate(image_ids):
-        result = process_image(library_root, image_id, debug_dir=debug_dir, weight_unit=weight_unit, ocr_roi=ocr_roi)
+        result = process_image(library_root, image_id, debug_dir=debug_dir, weight_unit=weight_unit, ocr_roi=ocr_roi, image_root=image_root)
         save_ocr_result(image_id, result)
 
         if result['status'] == 'done':

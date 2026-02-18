@@ -176,6 +176,18 @@ const API = {
         });
     },
 
+    // App settings
+    getSettings() {
+        return this._fetch('/api/settings');
+    },
+
+    updateSettings(data) {
+        return this._fetch('/api/settings', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
+
     // Item Codes
     getItemCodes() {
         return this._fetch('/api/item_codes');
