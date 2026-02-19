@@ -74,8 +74,11 @@ const App = {
 
         this._eventSource.addEventListener('root_changed', async () => {
             if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
-            StatusFeed.info('New content detected — syncing folders…');
+            const prevCount = this._folders.length;
             await this.loadFolders(false);
+            if (this._folders.length > prevCount) {
+                StatusFeed.info('New content detected — syncing folders…');
+            }
         });
 
         this._eventSource.addEventListener('folder_changed', async (e) => {

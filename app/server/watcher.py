@@ -1,12 +1,12 @@
 """Filesystem watcher for IMAGE_ROOT using watchdog.
 
-Watches IMAGE_ROOT non-recursively (one directory, minimal file descriptors)
-and debounces bursts of events into one notification after 500 ms.
+Watches IMAGE_ROOT recursively and debounces bursts of events into one
+notification after 500 ms.  Hidden paths (starting with '.', e.g. .library/)
+are filtered at the event level, so thumbnail directories are never watched.
 
-Only emits 'root_changed' — a direct child of IMAGE_ROOT was
-added/deleted/renamed (i.e. a new photo folder appeared or was removed).
-Within-folder file changes are handled by the existing on-demand sync in
-the image list endpoint, so recursive watching is not needed.
+Emits 'root_changed' whenever the folder list or its contents may have
+changed — new folder appeared, folder removed, or files added to a folder
+(e.g. cloud sync copying images into a newly created directory).
 """
 
 import os
@@ -49,12 +49,11 @@ class _ImageRootHandler(FileSystemEventHandler):
         publish_event(event_type, {})
 
     def on_any_event(self, event) -> None:
-        # With recursive=False, all events are direct children of IMAGE_ROOT.
-        # Any change (new folder, deleted folder, rename) means the root changed.
         src = event.src_path
         rel = os.path.relpath(src, self._image_root)
+        # Ignore hidden paths (covers .library/, .DS_Store, etc.)
         if rel.startswith('.'):
-            return  # ignore events on IMAGE_ROOT itself
+            return
 
         self._schedule('root_changed', None)
 
@@ -81,7 +80,7 @@ def start_watcher(image_root: str) -> None:
 
     handler = _ImageRootHandler(image_root)
     _observer = Observer()
-    _observer.schedule(handler, image_root, recursive=False)
+    _observer.schedule(handler, image_root, recursive=True)
     _observer.daemon = True
     _observer.start()
 
