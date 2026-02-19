@@ -4,16 +4,19 @@ import atexit
 import functools
 import json
 import os
+import queue
 import sys
 
-from flask import Flask, g, jsonify, request, send_file, send_from_directory, session
+from flask import Flask, Response, g, jsonify, request, send_file, send_from_directory, session, stream_with_context
 
 from .auth import (
     validate_credentials, get_active_sessions, set_active_session,
     clear_active_session, check_session_conflict, get_or_create_secret_key,
 )
 from .database import get_connection, init_db, row_to_dict, rows_to_dicts
+from .events import subscribe, unsubscribe
 from .importer import import_folder as do_import, IMAGE_EXTENSIONS
+from .watcher import start_watcher, stop_watcher
 
 LIBRARY_ROOT = os.getcwd()
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # app/
@@ -112,6 +115,8 @@ def create_app():
     _clear_all_marks()  # Clear stale marks from previous session
     _migrate_thumbnail_dirs()  # Move name-based thumb dirs to ID-based
     atexit.register(_clear_all_marks)
+    start_watcher(IMAGE_ROOT)
+    atexit.register(stop_watcher)
 
     # ── Auth middleware ──────────────────────────────────────────────
 
@@ -246,6 +251,43 @@ def create_app():
         except OSError:
             mtime = 0
         return jsonify({'mtime': mtime})
+
+    @app.route('/api/events', methods=['GET'])
+    def sse_stream():
+        """Server-Sent Events stream for filesystem change notifications.
+
+        Emits:
+          event: root_changed   — subfolder added/deleted under IMAGE_ROOT
+          event: folder_changed — files changed inside a subfolder
+                                  data: {"path": "<relative-folder-name>"}
+          : keepalive           — comment sent every 25 s to prevent proxy close
+        """
+        q = subscribe()
+
+        def generate():
+            try:
+                while True:
+                    try:
+                        event = q.get(timeout=25)
+                        yield (
+                            f"event: {event['type']}\n"
+                            f"data: {json.dumps(event['data'])}\n\n"
+                        )
+                    except queue.Empty:
+                        yield ": keepalive\n\n"
+            except GeneratorExit:
+                pass
+            finally:
+                unsubscribe(q)
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no',  # disable nginx buffering
+            },
+        )
 
     # ── App settings endpoints ───────────────────────────────────────
 

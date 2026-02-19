@@ -29,4 +29,4 @@ if __name__ == '__main__':
         print(f"Network access: http://{local_ip}:{port}")
     except Exception:
         print("Network access: http://<your-local-ip>:" + str(port))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True, reloader_type='stat')

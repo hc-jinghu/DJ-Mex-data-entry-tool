@@ -8,8 +8,7 @@ const App = {
     _activeFolderId: null,
     _importingPaths: new Set(),
     _currentRole: 'viewer',
-    _lastMtime: null,
-    _watchInterval: null,
+    _eventSource: null,
 
     async init() {
         StatusFeed.init();
@@ -69,22 +68,29 @@ const App = {
     },
 
     _startFolderWatch() {
-        if (this._watchInterval) clearInterval(this._watchInterval);
-        this._lastMtime = null;
-        this._watchInterval = setInterval(() => this._checkFolderChanges(), 15000);
-    },
+        if (this._eventSource) this._eventSource.close();
 
-    async _checkFolderChanges() {
-        // Skip if an import or OCR is already running to avoid interfering
-        if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
-        try {
-            const { mtime } = await API.getImageRootMtime();
-            if (this._lastMtime !== null && mtime !== this._lastMtime) {
-                StatusFeed.info('New content detected — syncing folders…');
-                await this.loadFolders(false);
+        this._eventSource = new EventSource('/api/events');
+
+        this._eventSource.addEventListener('root_changed', async () => {
+            if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
+            StatusFeed.info('New content detected — syncing folders…');
+            await this.loadFolders(false);
+        });
+
+        this._eventSource.addEventListener('folder_changed', async (e) => {
+            if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
+            const { path } = JSON.parse(e.data);
+            // Refresh image list if the active folder changed on disk
+            const activeFolder = this._folders.find(f => f.id === this._activeFolderId);
+            if (activeFolder && activeFolder.path === path) {
+                await Grid.loadFolder(this._activeFolderId);
             }
-            this._lastMtime = mtime;
-        } catch (_) { /* ignore network errors */ }
+        });
+
+        this._eventSource.onerror = () => {
+            // EventSource auto-reconnects after a backoff delay — no manual retry needed
+        };
     },
 
     async loadFolders(autoSelect = true) {
