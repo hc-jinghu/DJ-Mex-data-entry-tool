@@ -203,7 +203,16 @@ const Viewer = {
         }
 
         if (!ocr) {
-            this._ocrDetailEl.innerHTML = '<div class="viewer-no-ocr">No Metadata</div>';
+            const role = App.currentRole;
+            if (role === 'warehouse') {
+                // Warehouse can set tare_weight even before OCR runs
+                this._ocrDetailEl.innerHTML = '';
+                this._ocrDetailEl.appendChild(
+                    this._editableRow('tare_weight', '', imageId, false)
+                );
+            } else {
+                this._ocrDetailEl.innerHTML = '<div class="viewer-no-ocr">No Metadata</div>';
+            }
             return;
         }
 
@@ -224,7 +233,14 @@ const Viewer = {
         }
 
         // Skip tag/item/scale_weight/tare_weight if image hasn't been OCR'd yet
-        if (isPending) return;
+        if (isPending) {
+            if (role === 'warehouse') {
+                // Warehouse can set tare_weight even on pending images
+                const tw = ocr.tare_weight != null ? String(ocr.tare_weight) : '';
+                this._ocrDetailEl.appendChild(this._editableRow('tare_weight', tw, imageId, false));
+            }
+            return;
+        }
 
         // EVS tag check: only EVS tags unlock weight/item fields
         const isEvs = /^[A-Za-z]{3}\d{3}$/.test(ocr.tag);
@@ -250,11 +266,12 @@ const Viewer = {
             this._editableRow('scale_weight', isEvs && ocr.scale_weight != null ? String(ocr.scale_weight) : '', imageId, evsLockedReadonly)
         );
 
-        // Tare weight — editable for data_entry and warehouse (EVS tags only)
-        // warehouse can always edit tare_weight, even on readonly (manual-reviewed) folders
-        const tareReadonly = !isEvs || (isReadonly && role !== 'warehouse') || role === 'viewer';
+        // Tare weight — warehouse can always edit regardless of EVS tag or folder lock
+        // data_entry: editable only on non-reviewed folders with EVS tags
+        const tareReadonly = role === 'viewer' || (role !== 'warehouse' && (!isEvs || isReadonly));
+        const tareValue = ocr.tare_weight != null && (isEvs || role === 'warehouse') ? String(ocr.tare_weight) : '';
         this._ocrDetailEl.appendChild(
-            this._editableRow('tare_weight', isEvs && ocr.tare_weight != null ? String(ocr.tare_weight) : '', imageId, tareReadonly)
+            this._editableRow('tare_weight', tareValue, imageId, tareReadonly)
         );
     },
 

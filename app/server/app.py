@@ -1062,6 +1062,12 @@ def create_app():
             conn.close()
             return jsonify({'error': 'no fields to update'}), 400
 
+        # Ensure a row exists (warehouse may set tare_weight before OCR runs)
+        conn.execute(
+            "INSERT OR IGNORE INTO ocr_results (image_id, status) VALUES (?, 'pending')",
+            (image_id,)
+        )
+
         values.append(image_id)
         conn.execute(
             f"UPDATE ocr_results SET {', '.join(fields)} WHERE image_id = ?",
