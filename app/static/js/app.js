@@ -8,6 +8,8 @@ const App = {
     _activeFolderId: null,
     _importingPaths: new Set(),
     _currentRole: 'viewer',
+    _lastMtime: null,
+    _watchInterval: null,
 
     async init() {
         StatusFeed.init();
@@ -21,10 +23,7 @@ const App = {
         Settings.init();
         StatusFeed.info('Master Photo Library starting...');
 
-        // Wire up auth buttons
-        document.getElementById('btn-auth').addEventListener('click', () => this._showLoginOverlay());
-        document.getElementById('btn-login').addEventListener('click', () => this._handleLogin());
-        document.getElementById('btn-viewer').addEventListener('click', () => this._closeLoginOverlay());
+        // Wire up login overlay (still used by settings Role section)
         document.getElementById('login-password').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') this._handleLogin();
         });
@@ -63,7 +62,29 @@ const App = {
         // Load folders
         await this.loadFolders();
 
+        // Start watching IMAGE_ROOT for new folders (e.g. synced from Google Drive)
+        this._startFolderWatch();
+
         StatusFeed.success('Ready');
+    },
+
+    _startFolderWatch() {
+        if (this._watchInterval) clearInterval(this._watchInterval);
+        this._lastMtime = null;
+        this._watchInterval = setInterval(() => this._checkFolderChanges(), 15000);
+    },
+
+    async _checkFolderChanges() {
+        // Skip if an import or OCR is already running to avoid interfering
+        if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
+        try {
+            const { mtime } = await API.getImageRootMtime();
+            if (this._lastMtime !== null && mtime !== this._lastMtime) {
+                StatusFeed.info('New content detected — syncing folders…');
+                await this.loadFolders(false);
+            }
+            this._lastMtime = mtime;
+        } catch (_) { /* ignore network errors */ }
     },
 
     async loadFolders(autoSelect = true) {
@@ -739,16 +760,6 @@ const App = {
 
     applyRoleRestrictions() {
         const role = this._currentRole;
-        const authBtn = document.getElementById('btn-auth');
-
-        // Update auth button text
-        if (role === 'viewer') {
-            authBtn.textContent = 'Login';
-            authBtn.onclick = () => this._showLoginOverlay();
-        } else {
-            authBtn.textContent = `${role} (Logout)`;
-            authBtn.onclick = () => this.handleLogout();
-        }
 
         // Right panel (activity feed): hidden for viewer
         const rightPanel = document.getElementById('right-panel');

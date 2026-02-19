@@ -9,7 +9,7 @@
 <body>
     <div id="app">
         <div id="left-panel" class="panel">
-            <div class="panel-header">Folders <button id="btn-auth" class="btn btn-sm btn-auth" title="Login">Login</button></div>
+            <div class="panel-header">Folders</div>
             <div id="folder-list"></div>
             <div id="left-panel-footer">
                 <button id="btn-collapse-all" class="btn-collapse-all" title="Collapse all folders">&#8644;</button>
@@ -76,6 +76,7 @@
                 <div id="settings-nav">
                     <div class="settings-nav-item active" data-section="item-codes">Item Codes</div>
                     <div class="settings-nav-item" data-section="library-path">Library Path</div>
+                    <div class="settings-nav-item" data-section="role">Role</div>
                 </div>
                 <div id="settings-content">
                     <div id="settings-section-library-path" class="settings-section" style="display:none">
@@ -86,6 +87,31 @@
                             <button id="settings-path-save-btn" class="btn btn-sm">Save</button>
                         </div>
                         <div id="settings-path-status"></div>
+                    </div>
+                    <div id="settings-section-role" class="settings-section" style="display:none">
+                        <p class="settings-hint" id="settings-role-label"></p>
+                        <div id="settings-role-logout-area" class="hidden">
+                            <button id="settings-role-logout-btn" class="btn btn-sm">Log out</button>
+                            <div id="settings-role-logout-warning" class="hidden">
+                                <p class="settings-hint">Are you sure you want to log out?</p>
+                                <div class="settings-role-actions">
+                                    <button id="settings-role-logout-confirm-btn" class="btn btn-sm btn-danger">Yes, log out</button>
+                                    <button id="settings-role-logout-cancel-btn" class="btn btn-sm">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="settings-role-login-area" class="hidden">
+                            <select id="settings-role-select">
+                                <option value="data_entry">Data Entry</option>
+                                <option value="warehouse">Warehouse</option>
+                            </select>
+                            <div id="settings-role-form-fields">
+                                <input type="text" id="settings-role-username" placeholder="Username" autocomplete="username">
+                                <input type="password" id="settings-role-password" placeholder="Password" autocomplete="current-password">
+                            </div>
+                            <div id="settings-role-error" class="hidden"></div>
+                            <button id="settings-role-submit-btn" class="btn btn-sm">Login</button>
+                        </div>
                     </div>
                     <div id="settings-section-item-codes" class="settings-section">
                         <h3>Add Item Code</h3>

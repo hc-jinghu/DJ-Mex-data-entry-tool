@@ -1249,6 +1249,7 @@ body {
 #left-panel-footer {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     padding: 6px 10px;
     border-top: 1px solid var(--border);
     background: var(--bg-secondary);
@@ -1268,6 +1269,64 @@ body {
     color: var(--text-primary);
 }
 
+#settings-role-label {
+    font-size: 13px;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+#settings-role-logout-area.hidden,
+#settings-role-login-area.hidden,
+#settings-role-logout-warning.hidden {
+    display: none;
+}
+
+#settings-role-logout-warning {
+    margin-top: 10px;
+}
+
+#settings-role-select {
+    display: block;
+    width: 100%;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+#settings-role-form-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+#settings-role-form-fields input {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+
+#settings-role-error {
+    color: var(--danger);
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+
+#settings-role-error.hidden { display: none; }
+
+.settings-role-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
 .btn-settings {
     font-size: 24px;
     background: transparent;
@@ -1282,11 +1341,6 @@ body {
     color: var(--text-primary);
 }
 
-.btn-auth {
-    font-size: 10px !important;
-    padding: 2px 6px !important;
-    margin-left: auto;
-}
 
 /* ── Settings Overlay ───────────────────────────────────── */
 #settings-overlay {

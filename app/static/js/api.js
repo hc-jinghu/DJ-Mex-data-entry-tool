@@ -183,6 +183,10 @@ const API = {
         });
     },
 
+    getImageRootMtime() {
+        return this._fetch('/api/folders/mtime');
+    },
+
     // App settings
     getSettings() {
         return this._fetch('/api/settings');

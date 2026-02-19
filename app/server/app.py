@@ -238,6 +238,15 @@ def create_app():
 
         return jsonify(sorted_codes)
 
+    @app.route('/api/folders/mtime', methods=['GET'])
+    def get_image_root_mtime():
+        """Return the modification time of IMAGE_ROOT for change detection."""
+        try:
+            mtime = os.path.getmtime(IMAGE_ROOT)
+        except OSError:
+            mtime = 0
+        return jsonify({'mtime': mtime})
+
     # ── App settings endpoints ───────────────────────────────────────
 
     @app.route('/api/settings', methods=['GET'])

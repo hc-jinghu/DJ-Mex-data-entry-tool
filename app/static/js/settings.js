@@ -26,6 +26,21 @@ const Settings = {
             if (e.key === 'Enter') this._saveLibraryPath();
         });
 
+        document.getElementById('settings-role-logout-btn').addEventListener('click', () => {
+            document.getElementById('settings-role-logout-warning').classList.remove('hidden');
+        });
+        document.getElementById('settings-role-logout-cancel-btn').addEventListener('click', () => {
+            document.getElementById('settings-role-logout-warning').classList.add('hidden');
+        });
+        document.getElementById('settings-role-logout-confirm-btn').addEventListener('click', () => this._doRoleLogout());
+        document.getElementById('settings-role-submit-btn').addEventListener('click', () => this._submitRoleLogin());
+        document.getElementById('settings-role-username').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('settings-role-password').focus();
+        });
+        document.getElementById('settings-role-password').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this._submitRoleLogin();
+        });
+
         // Nav item switching
         document.querySelectorAll('.settings-nav-item').forEach(item => {
             item.addEventListener('click', () => this._switchSection(item.dataset.section));
@@ -55,6 +70,7 @@ const Settings = {
 
         document.getElementById('settings-overlay').classList.remove('hidden');
         this._loadItemCodes();
+        this._loadRole();
         if (isDataEntry) this._loadLibraryPath();
         document.getElementById('settings-code-input').focus();
     },
@@ -116,6 +132,45 @@ const Settings = {
             status.textContent = err.message;
             StatusFeed.error(`Failed to save path: ${err.message}`);
         }
+    },
+
+    _loadRole() {
+        const role = App._currentRole;
+        const labels = { viewer: 'Guest Viewer', data_entry: 'Data Entry', warehouse: 'Warehouse' };
+        document.getElementById('settings-role-label').textContent = labels[role] || role;
+        const isLoggedIn = role !== 'viewer';
+        document.getElementById('settings-role-logout-area').classList.toggle('hidden', !isLoggedIn);
+        document.getElementById('settings-role-login-area').classList.toggle('hidden', isLoggedIn);
+        document.getElementById('settings-role-logout-warning').classList.add('hidden');
+        document.getElementById('settings-role-error').classList.add('hidden');
+        document.getElementById('settings-role-username').value = '';
+        document.getElementById('settings-role-password').value = '';
+    },
+
+    async _submitRoleLogin() {
+        const role = document.getElementById('settings-role-select').value;
+        const username = document.getElementById('settings-role-username').value.trim();
+        const password = document.getElementById('settings-role-password').value;
+        const errorEl = document.getElementById('settings-role-error');
+        errorEl.classList.add('hidden');
+
+        try {
+            await API.login(role, username, password);
+            App._currentRole = role;
+            App.applyRoleRestrictions();
+            App._activeFolderId = null;
+            await App.loadFolders();
+            this._loadRole();
+            StatusFeed.success(`Logged in as ${role}`);
+        } catch (err) {
+            errorEl.textContent = err.message;
+            errorEl.classList.remove('hidden');
+        }
+    },
+
+    async _doRoleLogout() {
+        await App.handleLogout();
+        this._loadRole();
     },
 
     async _addItemCode() {
