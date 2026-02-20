@@ -346,12 +346,13 @@ const Viewer = {
 
             try {
                 await API.updateOcrResult(imageId, { item: code });
-                if (Grid._ocrResults[imageId]) {
-                    Grid._ocrResults[imageId].item = code;
-                    // Refresh grid's metadata panel if it's showing this image
-                    if (OcrDetail._currentImageId === imageId) {
-                        OcrDetail.show(imageId);
-                    }
+                if (!Grid._ocrResults[imageId]) {
+                    Grid._ocrResults[imageId] = { image_id: imageId, status: 'pending' };
+                }
+                Grid._ocrResults[imageId].item = code;
+                // Refresh grid's metadata panel if it's showing this image
+                if (OcrDetail._currentImageId === imageId) {
+                    OcrDetail.show(imageId);
                 }
                 StatusFeed.success(`Updated item → ${code}`);
             } catch (error) {
@@ -485,11 +486,13 @@ const Viewer = {
             // Step 1: save the field value
             try {
                 await API.updateOcrResult(imageId, payload);
-                if (Grid._ocrResults[imageId]) {
-                    Grid._ocrResults[imageId][field] = payload[field];
-                    if (OcrDetail._currentImageId === imageId) {
-                        OcrDetail.show(imageId);
-                    }
+                // Ensure a local entry exists (may not if OCR was never run on this image)
+                if (!Grid._ocrResults[imageId]) {
+                    Grid._ocrResults[imageId] = { image_id: imageId, status: 'pending' };
+                }
+                Grid._ocrResults[imageId][field] = payload[field];
+                if (OcrDetail._currentImageId === imageId) {
+                    OcrDetail.show(imageId);
                 }
                 StatusFeed.success(`Updated ${field} → ${newVal || '(cleared)'}`);
             } catch (err) {

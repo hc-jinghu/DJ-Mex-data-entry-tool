@@ -103,6 +103,9 @@ def _migrate_thumbnail_dirs():
 
 def create_app():
     """Create and configure the Flask application."""
+    import uuid
+    _startup_id = uuid.uuid4().hex  # changes on every server restart
+
     app = Flask(
         __name__,
         static_folder=os.path.join(APP_DIR, 'static'),
@@ -257,6 +260,8 @@ def create_app():
         """Server-Sent Events stream for filesystem change notifications.
 
         Emits:
+          event: server_version — sent immediately on connect; data: {"id": "<startup_id>"}
+                                  clients detect server restarts by comparing IDs
           event: root_changed   — subfolder added/deleted under IMAGE_ROOT
           event: folder_changed — files changed inside a subfolder
                                   data: {"path": "<relative-folder-name>"}
@@ -265,6 +270,11 @@ def create_app():
         q = subscribe()
 
         def generate():
+            # Announce this server's startup ID so clients can detect restarts
+            yield (
+                f"event: server_version\n"
+                f"data: {json.dumps({'id': _startup_id})}\n\n"
+            )
             try:
                 while True:
                     try:

@@ -69,8 +69,19 @@ const App = {
 
     _startFolderWatch() {
         if (this._eventSource) this._eventSource.close();
+        this._serverVersionId = null;
 
         this._eventSource = new EventSource('/api/events');
+
+        this._eventSource.addEventListener('server_version', (e) => {
+            const { id } = JSON.parse(e.data);
+            if (this._serverVersionId === null) {
+                this._serverVersionId = id;  // first connect — record baseline
+            } else if (this._serverVersionId !== id) {
+                this._serverVersionId = id;
+                StatusFeed.warn('App updated — please refresh the page (⌘R / F5)');
+            }
+        });
 
         this._eventSource.addEventListener('root_changed', async () => {
             if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
@@ -411,8 +422,12 @@ const App = {
             const newStatus = !folder.manual_reviewed;
             try {
                 await API.updateFolderManualReviewed(folder.id, newStatus);
-                folder.manual_reviewed = newStatus; // Update local state
-                
+                folder.manual_reviewed = newStatus; // Update closure's reference
+                // Also sync the live _folders entry — it may be a different object
+                // if loadFolders() refreshed the list since _selectFolder was called
+                const liveEntry = this._folders.find(f => f.id === folder.id);
+                if (liveEntry) liveEntry.manual_reviewed = newStatus;
+
                 // Also update Grid's state if this is the active folder
                 if (Grid.currentFolderId === folder.id) {
                     Grid._currentFolderManualReviewed = newStatus;

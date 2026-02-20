@@ -67,11 +67,24 @@ LED_SUBS = str.maketrans(
 _doctr_model = None
 
 def _get_doctr_model():
-    """Return the Doctr OCR predictor, loading it on first call."""
+    """Return the Doctr OCR predictor, loading it on first call.
+
+    Model weights are cached in .library/doctr_cache/ so they are shared
+    across devices (alongside the DB and thumbnails) and only need to be
+    downloaded once.
+    """
     global _doctr_model
     if _doctr_model is None:
+        # Point doctr at the project-local cache BEFORE importing doctr,
+        # because it reads DOCTR_CACHE_DIR at import time.
+        cache_dir = os.path.join(os.getcwd(), '.library', 'doctr_cache')
+        os.makedirs(cache_dir, exist_ok=True)
+        os.environ.setdefault('DOCTR_CACHE_DIR', cache_dir)
+
+        print(f"[OCR] Loading doctr model (cache: {cache_dir})", flush=True)
         from doctr.models import ocr_predictor
         _doctr_model = ocr_predictor(pretrained=True)
+        print("[OCR] doctr model ready", flush=True)
     return _doctr_model
 
 
