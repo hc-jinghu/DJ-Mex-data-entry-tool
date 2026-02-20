@@ -20,7 +20,7 @@ const App = {
 
         ROI.init();
         Settings.init();
-        StatusFeed.info('Master Photo Library starting...');
+        StatusFeed.info('Photo Tool starting...');
 
         // Wire up login overlay (still used by settings Role section)
         document.getElementById('login-password').addEventListener('keydown', (e) => {
@@ -766,9 +766,9 @@ const App = {
     applyRoleRestrictions() {
         const role = this._currentRole;
 
-        // Right panel (activity feed): hidden for viewer
+        // Right panel (folder summary + metadata): always visible
         const rightPanel = document.getElementById('right-panel');
-        rightPanel.style.display = role === 'viewer' ? 'none' : '';
+        rightPanel.style.display = '';
 
         // Grid actions bar: hidden for viewer
         const gridActions = document.getElementById('grid-actions');
