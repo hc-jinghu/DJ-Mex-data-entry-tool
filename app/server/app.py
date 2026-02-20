@@ -6,6 +6,7 @@ import json
 import os
 import queue
 import sys
+import threading
 
 from flask import Flask, Response, g, jsonify, request, send_file, send_from_directory, session, stream_with_context
 
@@ -14,9 +15,36 @@ from .auth import (
     clear_active_session, check_session_conflict, get_or_create_secret_key,
 )
 from .database import get_connection, init_db, row_to_dict, rows_to_dicts
-from .events import subscribe, unsubscribe
+from .events import publish_event, subscribe, unsubscribe
 from .importer import import_folder as do_import, IMAGE_EXTENSIONS
 from .watcher import start_watcher, stop_watcher
+
+# ── Per-folder tare_weight debounce ────────────────────────────────────────────
+# When warehouse saves a tare_weight, a 90-second timer is started (or reset if
+# one is already running).  After 90 s of silence the SSE event fires so other
+# clients can refresh without being disrupted on every individual keystroke save.
+
+_TARE_DEBOUNCE_S = 90
+_tare_timers: dict[int, threading.Timer] = {}
+_tare_lock = threading.Lock()
+
+
+def _schedule_tare_push(folder_id: int) -> None:
+    with _tare_lock:
+        existing = _tare_timers.pop(folder_id, None)
+        if existing:
+            existing.cancel()
+        t = threading.Timer(_TARE_DEBOUNCE_S, _fire_tare_push, args=(folder_id,))
+        t.daemon = True
+        _tare_timers[folder_id] = t
+        t.start()
+
+
+def _fire_tare_push(folder_id: int) -> None:
+    with _tare_lock:
+        _tare_timers.pop(folder_id, None)
+    publish_event('folder_ocr_updated', {'folder_id': folder_id})
+
 
 LIBRARY_ROOT = os.getcwd()
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # app/
@@ -434,8 +462,6 @@ def create_app():
                 match_dict = {**match, 'imported': True, 'parent': parent}
                 if 'manual_reviewed' not in match_dict:
                     match_dict['manual_reviewed'] = False
-                if 'warehouse_verified' not in match_dict:
-                    match_dict['warehouse_verified'] = False
                 all_folders.append(match_dict)
             else:
                 all_folders.append({
@@ -445,7 +471,6 @@ def create_app():
                     'image_count': len(image_files),
                     'imported': False,
                     'manual_reviewed': False,
-                    'warehouse_verified': False,
                     'parent': parent,
                 })
 
@@ -493,8 +518,6 @@ def create_app():
             return jsonify({'error': 'not found'}), 404
         if 'manual_reviewed' not in folder:
             folder['manual_reviewed'] = False
-        if 'warehouse_verified' not in folder:
-            folder['warehouse_verified'] = False
         return jsonify(folder)
 
     @app.route('/api/folders/<int:folder_id>/manual-reviewed', methods=['PUT'])
@@ -509,23 +532,6 @@ def create_app():
         conn.execute(
             "UPDATE folders SET manual_reviewed = ? WHERE id = ?",
             (manual_reviewed, folder_id)
-        )
-        conn.commit()
-        conn.close()
-        return jsonify({'success': True})
-
-    @app.route('/api/folders/<int:folder_id>/warehouse-verified', methods=['PUT'])
-    @require_role('warehouse')
-    def update_warehouse_verified(folder_id):
-        data = request.get_json()
-        warehouse_verified = data.get('warehouse_verified')
-        if warehouse_verified is None or not isinstance(warehouse_verified, bool):
-            return jsonify({'error': 'warehouse_verified (boolean) is required'}), 400
-
-        conn = get_connection()
-        conn.execute(
-            "UPDATE folders SET warehouse_verified = ? WHERE id = ?",
-            (warehouse_verified, folder_id)
         )
         conn.commit()
         conn.close()
@@ -1083,8 +1089,21 @@ def create_app():
             f"UPDATE ocr_results SET {', '.join(fields)} WHERE image_id = ?",
             values
         )
+
+        # Resolve folder_id before closing (needed for tare push below)
+        folder_id_row = None
+        if 'tare_weight' in data:
+            folder_id_row = conn.execute(
+                "SELECT folder_id FROM images WHERE id = ?", (image_id,)
+            ).fetchone()
+
         conn.commit()
         conn.close()
+
+        # Schedule a debounced SSE push so other clients see the new tare_weight
+        if folder_id_row:
+            _schedule_tare_push(folder_id_row['folder_id'])
+
         return jsonify({'success': True})
 
     @app.route('/api/ocr/export/<int:folder_id>', methods=['GET'])

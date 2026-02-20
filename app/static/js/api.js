@@ -42,13 +42,6 @@ const API = {
         });
     },
 
-    updateFolderWarehouseVerified(folderId, warehouseVerified) {
-        return this._fetch(`/api/folders/${folderId}/warehouse-verified`, {
-            method: 'PUT',
-            body: JSON.stringify({ warehouse_verified: warehouseVerified }),
-        });
-    },
-
     // Images
     getImages(folderId, status = 'all') {
         return this._fetch(`/api/folders/${folderId}/images?status=${status}`);
