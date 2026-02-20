@@ -903,6 +903,14 @@ def create_app():
         try:
             result = process_image(LIBRARY_ROOT, image_id, debug_dir=debug_dir, weight_unit=weight_unit, ocr_roi=ocr_roi, image_root=IMAGE_ROOT)
             save_ocr_result(image_id, result)
+
+            # Fetch tare_weight from DB (preserved across OCR runs)
+            conn2 = get_connection()
+            ocr_row = row_to_dict(conn2.execute(
+                "SELECT tare_weight, item FROM ocr_results WHERE image_id = ?", (image_id,)
+            ).fetchone())
+            conn2.close()
+
             resp = {
                 'image_id': image_id,
                 'filename': result.get('renamed') or image['filename'],
@@ -912,6 +920,8 @@ def create_app():
                 'status': result['status'],
                 'error_message': result.get('error_message'),
                 'pipeline': result.get('pipeline'),
+                'tare_weight': ocr_row.get('tare_weight') if ocr_row else None,
+                'item': ocr_row.get('item') if ocr_row else None,
             }
             if result.get('renamed'):
                 resp['renamed'] = result['renamed']
@@ -1185,14 +1195,14 @@ def create_app():
             # C: Gross
             if r['scale_weight'] is not None:
                 gross_cell = ws.cell(row=i, column=3, value=r['scale_weight'])
-                gross_cell.number_format = '0.00'
+                gross_cell.number_format = '0.##'
             # D: Tare (from DB if available)
             if r.get('tare_weight') is not None:
                 tare_cell = ws.cell(row=i, column=4, value=r['tare_weight'])
-                tare_cell.number_format = '0.00'
-            # E: Net = Gross - Tare (formula, 2 decimal places)
+                tare_cell.number_format = '0.##'
+            # E: Net = Gross - Tare (formula, decimals only when present)
             net_cell = ws.cell(row=i, column=5, value=f'=C{i}-D{i}')
-            net_cell.number_format = '0.00'
+            net_cell.number_format = '0.##'
             # F: Description (blank)
 
         buf = io.BytesIO()

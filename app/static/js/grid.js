@@ -592,13 +592,20 @@ const Grid = {
         return tag && /^[A-Za-z]{3}\d{3}$/.test(tag);
     },
 
+    _isRenamedToTag(filename, tag) {
+        // Check if filename (without extension) matches the EVS tag
+        if (!filename || !tag || !this._isEvsTag(tag)) return false;
+        const baseName = filename.replace(/\.[^.]+$/, '').toUpperCase();
+        return baseName === tag.toUpperCase();
+    },
+
     _updateOcrBadges() {
         const cards = this._gridEl.children;
         for (const card of cards) {
             const imageId = parseInt(card.dataset.imageId);
             const ocr = this._ocrResults[imageId];
             const nameEl = card.querySelector('.thumb-filename');
-            if (nameEl && ocr && this._isEvsTag(ocr.tag)) {
+            if (nameEl && ocr && this._isRenamedToTag(nameEl.textContent, ocr.tag)) {
                 nameEl.classList.add('thumb-renamed');
             }
         }
@@ -617,7 +624,7 @@ const Grid = {
 
         const nameEl = card.querySelector('.thumb-filename');
         if (nameEl) {
-            if (this._isEvsTag(result.tag)) {
+            if (this._isRenamedToTag(nameEl.textContent, result.tag)) {
                 nameEl.classList.add('thumb-renamed');
             } else {
                 nameEl.classList.remove('thumb-renamed');
@@ -678,9 +685,9 @@ const Grid = {
                 const nameEl = card.querySelector('.thumb-filename');
                 if (nameEl) {
                     nameEl.textContent = img.filename;
-                    // Green background only for EVS-tagged files
+                    // Green background only when filename matches EVS tag
                     const ocr = this._ocrResults[imageId];
-                    if (ocr && this._isEvsTag(ocr.tag)) {
+                    if (ocr && this._isRenamedToTag(img.filename, ocr.tag)) {
                         nameEl.classList.add('thumb-renamed');
                     } else {
                         nameEl.classList.remove('thumb-renamed');

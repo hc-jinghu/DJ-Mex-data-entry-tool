@@ -34,10 +34,10 @@ WEIGHT_PATTERN = re.compile(r'\d+\.?\d*')
 # Origin is bottom-left: y=1 is bottom row, y=8 is top row.
 # Cols 3-6 ≈ center-horizontal, rows 6-8 ≈ top ~3/8 of image.
 SCALE_ROI = [
-    [3,6],[3,7],[3,8],
-    [4,6],[4,7],[4,8],
-    [5,6],[5,7],[5,8],
-    [6,6],[6,7],[6,8],
+    [3,6],[3,7],
+    [4,6],[4,7],
+    [5,6],[5,7],
+    [6,6],[6,7],
 ]
 # Common 7-segment LED misreads → correct digit
 LED_SUBS = str.maketrans(
