@@ -86,9 +86,21 @@ const App = {
         this._eventSource.addEventListener('root_changed', async () => {
             if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
             const prevCount = this._folders.length;
+            const prevActiveId = this._activeFolderId;
             await this.loadFolders(false);
+
             if (this._folders.length > prevCount) {
                 StatusFeed.info('New content detected — syncing folders…');
+            } else if (this._folders.length < prevCount) {
+                StatusFeed.info('Folder removed — updated list');
+            }
+
+            // If active folder was deleted, clear the grid
+            if (prevActiveId && !this._folders.find(f => f.id === prevActiveId)) {
+                this._activeFolderId = null;
+                Grid.clear();
+                Viewer.close();
+                StatusFeed.warn('Active folder was removed');
             }
         });
 

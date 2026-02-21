@@ -47,6 +47,21 @@ const Grid = {
         return this._images.filter(img => this._selected.has(img.id));
     },
 
+    clear() {
+        this._images = [];
+        this._selected.clear();
+        this._currentFolderId = null;
+        this._focusIndex = -1;
+        this._mode = 'normal';
+        this._ocrResults = {};
+        this._ocrProcessingIds.clear();
+        this._currentFolderManualReviewed = false;
+        this._gridEl.innerHTML = '';
+        this._updateModeIndicator();
+        this._updateCullButton();
+        document.getElementById('btn-export').style.display = 'none';
+    },
+
     // ── Mode management ────────────────────────────────────────
 
     setMode(mode) {

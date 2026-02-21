@@ -1567,3 +1567,10 @@ body {
     font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
     line-height: 1.7;
 }
+
+.summary-warning {
+    margin-top: 8px;
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+}
