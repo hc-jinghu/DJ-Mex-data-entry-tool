@@ -216,15 +216,15 @@ body {
 }
 
 /* Hover override for last child border-based curve */
-.thread-seg.thread-seg-last:hover::before {
+.folder-group-children:hover .thread-seg.thread-seg-last::before {
     background: none;
     border-left-color: var(--accent);
     border-bottom-color: var(--accent);
 }
 
-/* Hover: highlight entire thread in accent color */
-.thread-seg:hover::before,
-.thread-seg:hover::after {
+/* Hover: highlight all thread segments as one line */
+.folder-group-children:hover .thread-seg::before,
+.folder-group-children:hover .thread-seg::after {
     background: var(--accent);
 }
 
