@@ -4,9 +4,10 @@ Watches IMAGE_ROOT recursively and debounces bursts of events into one
 notification after 500 ms.  Hidden paths (starting with '.', e.g. .library/)
 are filtered at the event level, so thumbnail directories are never watched.
 
-Emits 'root_changed' whenever the folder list or its contents may have
-changed — new folder appeared, folder removed, or files added to a folder
-(e.g. cloud sync copying images into a newly created directory).
+Emits two distinct event types:
+  root_changed   — a top-level entry was created or deleted (folder list changed)
+  folder_changed — files inside a specific subfolder changed (content changed)
+                   data: {"path": "<relative-folder-path>"}
 """
 
 import os
@@ -46,23 +47,35 @@ class _ImageRootHandler(FileSystemEventHandler):
     def _fire(self, event_type: str, folder_path: str | None) -> None:
         with self._lock:
             self._timers.pop((event_type, folder_path), None)
-        publish_event(event_type, {})
+        data = {'path': folder_path} if folder_path else {}
+        publish_event(event_type, data)
+
+    def _classify(self, rel: str) -> None:
+        """Schedule the right event based on path depth.
+
+        Top-level entries (depth 1) → root_changed  (folder list changed)
+        Entries inside a folder (depth 2+) → folder_changed  (content changed)
+        """
+        if rel.startswith('.'):
+            return
+        parts = rel.split(os.sep)
+        if len(parts) == 1:
+            self._schedule('root_changed', None)
+        else:
+            # folder path is everything except the final filename
+            folder_rel = os.sep.join(parts[:-1])
+            self._schedule('folder_changed', folder_rel)
 
     def on_any_event(self, event) -> None:
         src = event.src_path
         rel = os.path.relpath(src, self._image_root)
-        # Ignore hidden paths (covers .library/, .DS_Store, etc.)
-        if rel.startswith('.'):
-            return
-
-        self._schedule('root_changed', None)
+        self._classify(rel)
 
         # Also fire for the destination of a move
         dest = getattr(event, 'dest_path', None)
         if dest:
             dest_rel = os.path.relpath(dest, self._image_root)
-            if not dest_rel.startswith('.'):
-                self._schedule('root_changed', None)
+            self._classify(dest_rel)
 
 
 _observer: Observer | None = None

@@ -9,6 +9,7 @@ const App = {
     _importingPaths: new Set(),
     _currentRole: 'viewer',
     _eventSource: null,
+    _pendingGridRefresh: false,
 
     async init() {
         StatusFeed.init();
@@ -36,6 +37,7 @@ const App = {
         }
 
         document.getElementById('btn-collapse-all').addEventListener('click', () => this.collapseAll());
+        document.getElementById('btn-refresh-grid').addEventListener('click', () => this.refreshGrid());
 
         // Wire up buttons
         document.getElementById('btn-cull').addEventListener('click', () => this.startCulling());
@@ -84,7 +86,7 @@ const App = {
         });
 
         this._eventSource.addEventListener('root_changed', async () => {
-            if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
+            if (this._importingPaths.size > 0) return;
             const prevCount = this._folders.length;
             const prevActiveId = this._activeFolderId;
             await this.loadFolders(false);
@@ -98,6 +100,7 @@ const App = {
             // If active folder was deleted, clear the grid
             if (prevActiveId && !this._folders.find(f => f.id === prevActiveId)) {
                 this._activeFolderId = null;
+                document.getElementById('btn-refresh-grid').style.display = 'none';
                 Grid.clear();
                 Viewer.close();
                 StatusFeed.warn('Active folder was removed');
@@ -105,12 +108,16 @@ const App = {
         });
 
         this._eventSource.addEventListener('folder_changed', async (e) => {
-            if (this._importingPaths.size > 0 || Grid.isOcrProcessing) return;
             const { path } = JSON.parse(e.data);
-            // Refresh image list if the active folder changed on disk
             const activeFolder = this._folders.find(f => f.id === this._activeFolderId);
-            if (activeFolder && activeFolder.path === path) {
+            if (!activeFolder || activeFolder.path !== path) return;
+
+            if (Grid.isOcrProcessing) {
+                // Can't refresh mid-OCR — defer until batch completes
+                this._pendingGridRefresh = true;
+            } else {
                 await Grid.loadFolder(this._activeFolderId);
+                StatusFeed.info('Changes detected: Auto-refreshed grid view');
             }
         });
 
@@ -491,6 +498,9 @@ const App = {
 
         gridTitleEl.appendChild(manualReviewedChip);
 
+        // Show refresh button when a folder is active
+        document.getElementById('btn-refresh-grid').style.display = '';
+
         // Re-render sidebar to update active state
         this._renderFolderList();
 
@@ -644,14 +654,29 @@ const App = {
             `OCR complete: ${doneCount} done, ${errorCount} error(s)`
         );
 
-        // Refresh folder summary after OCR batch completes
-        this.updateFolderSummary();
+        // Auto-refresh grid to pick up renames, status changes, and any
+        // folder_changed events that were deferred while OCR was running
+        if (this._activeFolderId) {
+            this._pendingGridRefresh = false;
+            await Grid.loadFolder(this._activeFolderId);
+            StatusFeed.info('Changes detected: Auto-refreshed grid view');
+        }
     },
 
     exportOcr() {
         if (!this._activeFolderId) return;
         // Trigger download by navigating to the export URL
         window.location.href = API.exportOcrUrl(this._activeFolderId);
+    },
+
+    async refreshGrid() {
+        if (!this._activeFolderId) return;
+        if (Grid.isOcrProcessing) {
+            StatusFeed.warn('Cannot refresh while OCR is running');
+            return;
+        }
+        await Grid.loadFolder(this._activeFolderId);
+        StatusFeed.info('Changes detected: Auto-refreshed grid view');
     },
 
     updateFolderSummary() {
@@ -674,7 +699,8 @@ const App = {
         const tagPattern = /^[A-Za-z]{3}\d{3}$/;
 
         results.forEach(r => {
-            if (r.tag && tagPattern.test(r.tag)) pallets++;
+            if (!r.tag || !tagPattern.test(r.tag)) return;
+            pallets++;
             if (r.scale_weight != null && r.scale_weight !== '') {
                 const w = parseFloat(r.scale_weight);
                 if (!isNaN(w)) totalGross += w;

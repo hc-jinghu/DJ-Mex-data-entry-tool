@@ -485,7 +485,7 @@ def create_app():
         return jsonify({'folders': all_folders, 'groups': groups})
 
     @app.route('/api/folders/import', methods=['POST'])
-    @require_role('data_entry')
+    @require_role('data_entry', 'warehouse')
     def import_folder():
         """Import a folder: scan, insert to DB, generate thumbnails."""
         from .importer import import_folder as do_import
@@ -501,6 +501,7 @@ def create_app():
 
         try:
             result = do_import(LIBRARY_ROOT, folder_path, image_root=IMAGE_ROOT)
+            publish_event('root_changed', {})
             return jsonify(result)
         except Exception as e:
             import traceback
