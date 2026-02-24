@@ -112,6 +112,9 @@ const App = {
             const activeFolder = this._folders.find(f => f.id === this._activeFolderId);
             if (!activeFolder || activeFolder.path !== path) return;
 
+            // Suppress events triggered by in-place renames (grid already updated)
+            if (Date.now() < (this._renameCooldownUntil || 0)) return;
+
             if (Grid.isOcrProcessing) {
                 // Can't refresh mid-OCR — defer until batch completes
                 this._pendingGridRefresh = true;

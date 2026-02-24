@@ -350,6 +350,9 @@ const Grid = {
                 await API.renameImage(imageId, newName);
                 img.filename = newName;
                 img.filepath = img.filepath.replace(/[^/]+$/, newName);
+                // Suppress the folder_changed SSE that the watcher will fire
+                // from the disk rename — the grid is already updated in-place
+                App._renameCooldownUntil = Date.now() + 2000;
                 StatusFeed.success(`Renamed to ${newName}`);
             } catch (err) {
                 StatusFeed.error(`Rename failed: ${err.message}`);
