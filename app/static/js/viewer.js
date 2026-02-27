@@ -26,10 +26,10 @@ const Viewer = {
     _itemCodes: null,
 
     POOL_SIZE: 5,
-    // Magnifier: sample a 50x50 area relative to 1080p, display in a 250px lens
-    MAG_SAMPLE: 50,
+    // Magnifier: sample a 50x50 area relative to 1080p, display in a 500px lens
+    MAG_SAMPLE: 75,
     MAG_REF_H: 1080,
-    MAG_SIZE: 250,
+    MAG_SIZE: 500,
 
     async init() {
         this._overlay = document.getElementById('viewer-overlay');
@@ -652,13 +652,12 @@ const Viewer = {
         this._magnifier.style.backgroundSize = `${bgW}px ${bgH}px`;
         this._magnifier.style.backgroundPosition = `${bgX}px ${bgY}px`;
 
-        // Position lens near cursor (offset so it doesn't block the pointer)
+        // Position lens centered on cursor, clamped within the main panel
         const mainRect = this._main.getBoundingClientRect();
-        let lx = e.clientX - mainRect.left + 20;
-        let ly = e.clientY - mainRect.top + 20;
-        // Keep within the main panel
-        if (lx + this.MAG_SIZE > mainRect.width) lx = e.clientX - mainRect.left - this.MAG_SIZE - 20;
-        if (ly + this.MAG_SIZE > mainRect.height) ly = e.clientY - mainRect.top - this.MAG_SIZE - 20;
+        let lx = e.clientX - mainRect.left - this.MAG_SIZE / 2;
+        let ly = e.clientY - mainRect.top - this.MAG_SIZE / 2;
+        lx = Math.max(0, Math.min(lx, mainRect.width - this.MAG_SIZE));
+        ly = Math.max(0, Math.min(ly, mainRect.height - this.MAG_SIZE));
 
         this._magnifier.style.left = `${lx}px`;
         this._magnifier.style.top = `${ly}px`;

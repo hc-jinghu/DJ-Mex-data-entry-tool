@@ -11,7 +11,17 @@ const App = {
     _eventSource: null,
     _pendingGridRefresh: false,
 
+    _saveExpandedGroups() {
+        localStorage.setItem('expandedGroups', JSON.stringify([...this._expandedGroups]));
+    },
+
     async init() {
+        // Restore expanded group state from previous session
+        try {
+            const saved = localStorage.getItem('expandedGroups');
+            if (saved) this._expandedGroups = new Set(JSON.parse(saved));
+        } catch (_) {}
+
         StatusFeed.init();
         Grid.init();
         OcrDetail.init();
@@ -156,10 +166,10 @@ const App = {
 
             // Only auto-select if no folder is currently active
             if (autoSelect && !this._activeFolderId) {
-                const imported = this._folders.find(f => f.imported);
-                if (imported) {
-                    this._selectFolder(imported);
-                }
+                const savedId = parseInt(localStorage.getItem('lastFolderId'), 10);
+                const toSelect = (savedId && this._folders.find(f => f.id === savedId && f.imported))
+                    || this._folders.find(f => f.imported);
+                if (toSelect) this._selectFolder(toSelect);
             }
 
             // Auto-import unimported folders in the background
@@ -174,6 +184,7 @@ const App = {
 
     collapseAll() {
         this._expandedGroups.clear();
+        this._saveExpandedGroups();
         this._renderFolderList();
     },
 
@@ -325,6 +336,7 @@ const App = {
                 } else {
                     this._expandedGroups.add(group.name);
                 }
+                this._saveExpandedGroups();
                 this._renderFolderList();
             });
 
@@ -347,6 +359,7 @@ const App = {
                 const collapseThread = (e) => {
                     e.stopPropagation();
                     this._expandedGroups.delete(group.name);
+                    this._saveExpandedGroups();
                     this._renderFolderList();
                 };
 
@@ -376,6 +389,7 @@ const App = {
                 collapsed.textContent = metaText;
                 collapsed.addEventListener('click', () => {
                     this._expandedGroups.add(group.name);
+                    this._saveExpandedGroups();
                     this._renderFolderList();
                 });
                 wrapper.appendChild(collapsed);
@@ -427,7 +441,8 @@ const App = {
         if (!folder.imported) return;
 
         this._activeFolderId = folder.id;
-        
+        localStorage.setItem('lastFolderId', String(folder.id));
+
         const gridTitleEl = document.getElementById('grid-title');
         gridTitleEl.innerHTML = ''; // Clear existing content
 
