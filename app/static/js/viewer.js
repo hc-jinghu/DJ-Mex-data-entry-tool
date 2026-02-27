@@ -607,8 +607,10 @@ const Viewer = {
         if (this._magActive) {
             this._setupMagBackground();
             this._magnifier.classList.remove('hidden');
+            this._main.style.cursor = 'none';
         } else {
             this._magnifier.classList.add('hidden');
+            this._main.style.cursor = '';
         }
     },
 
