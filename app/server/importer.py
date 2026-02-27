@@ -3,7 +3,7 @@
 import os
 
 from .database import get_connection
-from .thumbnails import generate_thumbnail, get_image_dimensions
+from .thumbnails import compress_image, generate_thumbnail, get_image_dimensions
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.tiff', '.heic'}
 
@@ -142,6 +142,14 @@ def import_folder(library_root, folder_path, image_root=None):
     for filename in (disk_set - db_set):
         inode, file_size = disk_files[filename]
         source_path = os.path.join(full_folder, filename)
+
+        # Compress/convert large images before recording stats
+        new_path = compress_image(source_path)
+        if new_path is not None:
+            source_path = new_path
+            filename = os.path.basename(new_path)
+            stat = os.stat(source_path)
+            inode, file_size = stat.st_ino, stat.st_size
 
         thumb_filename = generate_thumbnail(source_path, thumb_dir, filename)
         thumb_rel = f"{folder_id}/{thumb_filename}" if thumb_filename else None
