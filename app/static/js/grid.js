@@ -17,10 +17,42 @@ const Grid = {
     _ocrResults: {},  // image_id -> ocr result
     _ocrProcessingIds: new Set(),  // image IDs currently being OCR-processed
     _currentFolderManualReviewed: false, // New property to store folder's manual_reviewed status
+    _searchQuery: '',
 
     init() {
         this._gridEl = document.getElementById('thumbnail-grid');
         this._setupObserver();
+        this._initSearch();
+    },
+
+    _initSearch() {
+        const input = document.getElementById('grid-search-input');
+        input.addEventListener('input', () => {
+            this.setSearch(input.value);
+        });
+        // Prevent grid keyboard shortcuts from firing while typing in search
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+        });
+    },
+
+    setSearch(query) {
+        this._searchQuery = query.trim();
+        this.render();
+        this._updateSearchCount();
+    },
+
+    _updateSearchCount() {
+        const countEl = document.getElementById('grid-search-count');
+        if (!countEl) return;
+        const q = this._searchQuery.toLowerCase();
+        if (!q) {
+            countEl.textContent = '';
+            return;
+        }
+        const active = this._images.filter(img => img.status !== 'deleted');
+        const matched = active.filter(img => img.filename.toLowerCase().includes(q));
+        countEl.textContent = `${matched.length} / ${active.length}`;
     },
 
     _setupObserver() {
@@ -56,10 +88,14 @@ const Grid = {
         this._ocrResults = {};
         this._ocrProcessingIds.clear();
         this._currentFolderManualReviewed = false;
+        this._searchQuery = '';
         this._gridEl.innerHTML = '';
         this._updateModeIndicator();
         this._updateCullButton();
         document.getElementById('btn-export').style.display = 'none';
+        document.getElementById('grid-search-bar').classList.add('hidden');
+        document.getElementById('grid-search-input').value = '';
+        document.getElementById('grid-search-count').textContent = '';
     },
 
     // ── Mode management ────────────────────────────────────────
@@ -449,9 +485,13 @@ const Grid = {
         this._renaming = false;
         this._ocrResults = {};
         this._currentFolderManualReviewed = false; // Reset before loading new folder
+        this._searchQuery = '';
         this._updateModeIndicator();
         this._updateCullButton();
         document.getElementById('btn-export').style.display = 'none';
+        document.getElementById('grid-search-bar').classList.remove('hidden');
+        document.getElementById('grid-search-input').value = '';
+        document.getElementById('grid-search-count').textContent = '';
 
         this._setSyncing(true);
         const folderEntry = App._folders.find(f => f.id === folderId);
@@ -477,55 +517,139 @@ const Grid = {
 
     // ── Rendering ──────────────────────────────────────────────
 
+    _makeCard(img, index) {
+        const card = document.createElement('div');
+        card.className = 'thumb-card';
+        card.dataset.imageId = img.id;
+        card.dataset.index = index;
+
+        if (!this._currentFolderManualReviewed) {
+            if (img.status !== 'active') card.classList.add(`status-${img.status}`);
+        } else {
+            if (img.status === 'marked_delete') card.classList.add('status-marked_delete');
+        }
+        if (this._selected.has(img.id)) card.classList.add('selected');
+        if (index === this._focusIndex) card.classList.add('focused');
+
+        const imgEl = document.createElement('img');
+        imgEl.dataset.src = API.thumbnailUrl(img.id);
+        imgEl.alt = img.filename;
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'thumb-filename';
+        nameEl.textContent = img.filename;
+
+        card.appendChild(imgEl);
+        card.appendChild(nameEl);
+
+        card.addEventListener('click', (e) => this._handleClick(e, img, card));
+        card.addEventListener('dblclick', () => this._handleDoubleClick(img));
+
+        return card;
+    },
+
     render() {
         this._gridEl.innerHTML = '';
 
-        const activeImages = this._images.filter(img => img.status !== 'deleted');
+        const q = this._searchQuery.toLowerCase();
+        const activeImages = this._images
+            .filter(img => img.status !== 'deleted')
+            .filter(img => !q || img.filename.toLowerCase().includes(q));
 
         activeImages.forEach((img, index) => {
-            const card = document.createElement('div');
-            card.className = 'thumb-card';
-            card.dataset.imageId = img.id;
-            card.dataset.index = index;
-
-            // Only apply status classes if the folder is NOT manual_reviewed
-            if (!this._currentFolderManualReviewed) {
-                if (img.status !== 'active') {
-                    card.classList.add(`status-${img.status}`);
-                }
-            } else {
-                // If manual_reviewed, ensure no OCR specific classes are added,
-                // but still allow delete status if applicable
-                if (img.status === 'marked_delete') {
-                    card.classList.add('status-marked_delete');
-                }
-            }
-            if (this._selected.has(img.id)) {
-                card.classList.add('selected');
-            }
-            if (index === this._focusIndex) {
-                card.classList.add('focused');
-            }
-
-            const imgEl = document.createElement('img');
-            imgEl.dataset.src = API.thumbnailUrl(img.id);
-            imgEl.alt = img.filename;
-
-            const nameEl = document.createElement('div');
-            nameEl.className = 'thumb-filename';
-            nameEl.textContent = img.filename;
-
-            card.appendChild(imgEl);
-            card.appendChild(nameEl);
-
-            card.addEventListener('click', (e) => this._handleClick(e, img, card));
-            card.addEventListener('dblclick', () => this._handleDoubleClick(img));
-
+            const card = this._makeCard(img, index);
             this._gridEl.appendChild(card);
             this._observer.observe(card);
         });
 
         this._updateExecuteButton();
+        this._updateSearchCount();
+    },
+
+    // Diff-based update for same-folder refreshes: no flash, no scroll/focus reset.
+    _renderDiff(newImages) {
+        const q = this._searchQuery.toLowerCase();
+        const activeImages = newImages
+            .filter(img => img.status !== 'deleted')
+            .filter(img => !q || img.filename.toLowerCase().includes(q));
+
+        const oldImageMap = new Map(this._images.map(img => [img.id, img]));
+
+        // Map current DOM cards by image id
+        const existingCards = new Map();
+        for (const card of this._gridEl.children) {
+            existingCards.set(parseInt(card.dataset.imageId), card);
+        }
+
+        const newIds = new Set(activeImages.map(img => img.id));
+
+        // Remove cards for images no longer present
+        for (const [id, card] of existingCards) {
+            if (!newIds.has(id)) {
+                this._observer.unobserve(card);
+                card.remove();
+                this._selected.delete(id);
+                existingCards.delete(id);
+            }
+        }
+
+        // Insert/update cards in sorted order without touching unchanged ones
+        let referenceNode = this._gridEl.firstChild;
+        activeImages.forEach((img, index) => {
+            const existing = existingCards.get(img.id);
+            if (existing) {
+                existing.dataset.index = index;
+
+                // Cache-bust thumbnail if file content changed
+                const old = oldImageMap.get(img.id);
+                if (old && (old.file_size !== img.file_size || old.inode !== img.inode)) {
+                    const imgEl = existing.querySelector('img');
+                    if (imgEl) imgEl.src = API.thumbnailUrl(img.id) + '?t=' + Date.now();
+                }
+
+                // Update filename label
+                const nameEl = existing.querySelector('.thumb-filename');
+                if (nameEl) nameEl.textContent = img.filename;
+
+                // Update status classes, preserving selected/focused state
+                const isSelected = existing.classList.contains('selected');
+                const isFocused = existing.classList.contains('focused');
+                existing.className = 'thumb-card';
+                if (!this._currentFolderManualReviewed) {
+                    if (img.status !== 'active') existing.classList.add(`status-${img.status}`);
+                } else {
+                    if (img.status === 'marked_delete') existing.classList.add('status-marked_delete');
+                }
+                if (isSelected) existing.classList.add('selected');
+                if (isFocused) existing.classList.add('focused');
+
+                if (existing !== referenceNode) this._gridEl.insertBefore(existing, referenceNode);
+                referenceNode = existing.nextSibling;
+            } else {
+                const card = this._makeCard(img, index);
+                this._gridEl.insertBefore(card, referenceNode);
+                this._observer.observe(card);
+                referenceNode = card.nextSibling;
+            }
+        });
+
+        this._images = newImages;
+        this._updateExecuteButton();
+        this._updateSearchCount();
+    },
+
+    async refreshInPlace(folderId) {
+        if (folderId !== this._currentFolderId) return this.loadFolder(folderId);
+        try {
+            const folderData = await API.getFolder(folderId);
+            this._currentFolderManualReviewed = folderData.manual_reviewed;
+            this._updateCullButton();
+            const newImages = (await API.getImages(folderId, 'all')).filter(i => i.status !== 'deleted');
+            this._renderDiff(newImages);
+            this.loadOcrResults();
+        } catch (err) {
+            StatusFeed.error(`Failed to refresh: ${err.message}`);
+        }
     },
 
     // ── Click handling ─────────────────────────────────────────
@@ -687,10 +811,11 @@ const Grid = {
         }
     },
 
-    updateImageInPlace(imageId, newStatus) {
+    updateImageInPlace(imageId, newStatus, newFilename = null) {
         const img = this._images.find(i => i.id === imageId);
         if (img) {
             img.status = newStatus;
+            if (newFilename !== null) img.filename = newFilename;
             const card = this._gridEl.querySelector(`[data-image-id="${imageId}"]`);
             if (card) {
                 card.className = 'thumb-card';

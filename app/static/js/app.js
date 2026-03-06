@@ -129,8 +129,7 @@ const App = {
                 // Can't refresh mid-OCR — defer until batch completes
                 this._pendingGridRefresh = true;
             } else {
-                await Grid.loadFolder(this._activeFolderId);
-                StatusFeed.info('Changes detected: Auto-refreshed grid view');
+                await Grid.refreshInPlace(this._activeFolderId);
             }
         });
 
@@ -639,7 +638,7 @@ const App = {
                 if (result.renamed) {
                     img.filename = result.renamed;
                     img.filepath = img.filepath.replace(/[^/]+$/, result.renamed);
-                    Grid.updateImageInPlace(img.id, img.status);
+                    Grid.updateImageInPlace(img.id, img.status, result.renamed);
                 }
 
                 // Update grid badge immediately
@@ -676,8 +675,7 @@ const App = {
         // folder_changed events that were deferred while OCR was running
         if (this._activeFolderId) {
             this._pendingGridRefresh = false;
-            await Grid.loadFolder(this._activeFolderId);
-            StatusFeed.info('Changes detected: Auto-refreshed grid view');
+            await Grid.refreshInPlace(this._activeFolderId);
         }
     },
 
@@ -693,8 +691,7 @@ const App = {
             StatusFeed.warn('Cannot refresh while OCR is running');
             return;
         }
-        await Grid.loadFolder(this._activeFolderId);
-        StatusFeed.info('Changes detected: Auto-refreshed grid view');
+        await Grid.refreshInPlace(this._activeFolderId);
     },
 
     updateFolderSummary() {
@@ -763,7 +760,7 @@ const App = {
 
             // Reload grid, then update sidebar counts
             if (Grid.currentFolderId) {
-                await Grid.loadFolder(Grid.currentFolderId);
+                await Grid.refreshInPlace(Grid.currentFolderId);
             }
             await this.loadFolders(false);
         } catch (err) {

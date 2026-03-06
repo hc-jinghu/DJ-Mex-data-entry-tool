@@ -74,6 +74,37 @@ body {
     min-width: 280px;
 }
 
+/* ── Center Panel: Search Bar ────────────────────────────── */
+#grid-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+}
+
+#grid-search-input {
+    flex: 1;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 13px;
+    padding: 4px 8px;
+    outline: none;
+}
+
+#grid-search-input:focus {
+    border-color: var(--accent);
+}
+
+#grid-search-count {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
 /* ── Left Panel: Folder List ──────────────────────────────── */
 #folder-list {
     flex: 1;

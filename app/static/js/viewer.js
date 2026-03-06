@@ -528,7 +528,7 @@ const Viewer = {
                             img.filename = newName;
                             img.filepath = img.filepath.replace(/[^/]+$/, newName);
                             this._filenameEl.textContent = newName;
-                            Grid.updateImageInPlace(img.id, img.status);
+                            Grid.updateImageInPlace(img.id, img.status, newName);
                         } catch (renameErr) {
                             StatusFeed.error(`Rename failed: ${renameErr.message}`);
                         }

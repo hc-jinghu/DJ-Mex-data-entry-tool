@@ -174,7 +174,7 @@ const Culler = {
 
             // Refresh grid
             if (Grid.currentFolderId) {
-                Grid.loadFolder(Grid.currentFolderId);
+                Grid.refreshInPlace(Grid.currentFolderId);
             }
         } catch (err) {
             StatusFeed.error(`Finalize failed: ${err.message}`);
